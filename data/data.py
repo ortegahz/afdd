@@ -46,16 +46,20 @@ class DataV0(DataBase):
             self.db[key].seq_state_arc = np.array([0] * self.db[key].len)
             self.db[key].seq_state_normal = np.array([0] * self.db[key].len)
         file_label = glob.glob(os.path.join(self.dir_in, '*.xlsx'))
-        assert len(file_label) == 1
+        if not len(file_label) == 1:
+            return
         df = pd.read_excel(file_label[0], engine='openpyxl')
         alarm_index = df.columns.get_loc("报警位置")
         normal_index = df.columns.get_loc("正常位置")
         for index, row in df.iterrows():
             key = row['文件名'].replace('_power', '')
-            alarm_interval_0 = row[alarm_index].split('~')
-            normal_interval_0 = row[normal_index].split('~')
-            self.db[key].seq_state_arc[int(alarm_interval_0[0]):int(alarm_interval_0[1])] = STATE_INDICATE_VAL
-            self.db[key].seq_state_normal[int(normal_interval_0[0]):int(normal_interval_0[1])] = STATE_INDICATE_VAL / 2
+            alarm_interval_0 = row[alarm_index].split('~') if pd.notna(row[alarm_index]) else None
+            normal_interval_0 = row[normal_index].split('~') if pd.notna(row[normal_index]) else None
+            if alarm_interval_0 is not None:
+                self.db[key].seq_state_arc[int(alarm_interval_0[0]):int(alarm_interval_0[1])] = STATE_INDICATE_VAL
+            if normal_interval_0 is not None:
+                self.db[key].seq_state_normal[int(normal_interval_0[0]):int(normal_interval_0[1])] = \
+                    STATE_INDICATE_VAL / 2
             for i in range(1, len(df.columns) - max(alarm_index, normal_index)):
                 next_alarm_col = alarm_index + i
                 next_normal_col = normal_index + i
@@ -81,6 +85,7 @@ class DataV0(DataBase):
         ax1.plot(time_stamps, np.array(seq_power).astype(float), label='power')
         ax1.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         ax1.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
+        ax1.set_ylim(0, 4096)
         ax1.legend()
         ax2.plot(time_stamps, np.array(seq_hf).astype(float), label='hf')
         ax2.legend()
