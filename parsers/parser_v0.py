@@ -7,7 +7,7 @@ from utils.utils import set_logging
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dir_in', default='/media/manu/data/afdd/故障电弧实验/并联碳化3KW_1')
+    parser.add_argument('--dir_in', default='/media/manu/data/afdd/故障电弧实验/并联金属3KW_0.7')
     return parser.parse_args()
 
 
