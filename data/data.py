@@ -5,7 +5,6 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy import signal
 import pywt
 
 from utils.macros import *
@@ -77,8 +76,9 @@ class DataV0(DataBase):
 
     def plot(self, idx_pick=0, pause_time_s=1024, dir_save=None, show=True):
         plt.ion()
+        fig, (ax1, ax2) = plt.subplots(2, 1)
         for idx in range(len(self.db.keys())):
-            if idx_pick is not None and idx != idx_pick:
+            if 0 <= idx_pick != idx:
                 continue
             key = list(self.db.keys())[idx]
             seq_power = self.db[key].seq_power
@@ -87,7 +87,6 @@ class DataV0(DataBase):
             seq_state_arc = self.db[key].seq_state_arc
             seq_state_normal = self.db[key].seq_state_normal
             time_stamps = np.array(range(seq_len))
-            fig, (ax1, ax2) = plt.subplots(2, 1)
             ax1.plot(time_stamps, np.array(seq_power).astype(float), label='power')
             ax1.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
             ax1.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
@@ -101,11 +100,12 @@ class DataV0(DataBase):
             # scales = np.arange(1, 8)
             # coefficients, frequencies = pywt.cwt(np.array(seq_power).astype(float), scales, wavelet, 1 / self.db[key].sps)
             # plt.pcolormesh(time_stamps, frequencies, np.abs(coefficients), shading='gouraud')
-            wavelet = 'sym20'
+            # wavelet, max_level = 'db5', 4  # hu's work --> db5 with 4 levels
+            wavelet = 'sym2'
             logging.info(pywt.wavelist())
             max_level = pywt.dwt_max_level(seq_len, pywt.Wavelet(wavelet).dec_len)
+            level = 10
             coeffs = pywt.wavedec(np.array(seq_power).astype(float), wavelet, level=max_level)
-            level = max_level
             plt.plot(coeffs[level], label=f'{wavelet} level {level} [{max_level}]')
             ax2.set_xlim(0, len(coeffs[level]))
             # val_lim = 2 ** 15
