@@ -1,0 +1,61 @@
+import glob
+import logging
+import os
+
+from cores.arc_detector import ArcDetector
+from data.data import DataV0
+
+
+class DetectorWrapperBase:
+    def __init__(self, addr):
+        self.addr = addr
+
+    def run(self):
+        raise NotImplementedError
+
+
+class DetectorWrapperV0(DetectorWrapperBase):
+    """
+    format: case/<key_*>.BIN + ... + *.xlsx
+    """
+
+    def __init__(self, addr):
+        super().__init__(addr)
+        self.arc_detector = ArcDetector()
+        self.db_offline = DataV0(addr)
+        self.db_offline.load()
+
+    def _process_single(self, key):
+        db_offline_single = self.db_offline.db[key]
+        for idx in range(db_offline_single.len):
+            cur_power = db_offline_single.seq_power[idx]
+            cur_state_gt_arc = db_offline_single.seq_state_arc[idx]
+            cur_state_gt_normal = db_offline_single.seq_state_normal[idx]
+            self.arc_detector.db.update(cur_power=cur_power,
+                                        cur_state_gt_arc=cur_state_gt_arc,
+                                        cur_state_gt_normal=cur_state_gt_normal)
+        self.arc_detector.db.plot()
+        self.arc_detector.db.reset()
+
+    def run(self):
+        for key in self.db_offline.db.keys():
+            self._process_single(key)
+
+
+class DetectorWrapperV1(DetectorWrapperV0):
+    """
+    format: dir/<cases>/<key_*>.BIN + ... + *.xlsx
+    """
+
+    def __init__(self, addr):
+        super().__init__(addr)
+        self.arc_detector = ArcDetector()
+
+    def run(self):
+        cases_dir = glob.glob(os.path.join(self.addr, '*/'))
+        for case_dir in cases_dir:
+            logging.info(f'case_dir: {case_dir}')
+            self.db_offline = DataV0(case_dir)
+            self.db_offline.load()
+            for key in self.db_offline.db.keys():
+                self._process_single(key)
