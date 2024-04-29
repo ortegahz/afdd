@@ -1,6 +1,7 @@
 import glob
 import logging
 import os
+from dataclasses import dataclass, field
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,23 +9,13 @@ import pandas as pd
 import pywt
 
 from utils.macros import *
+from utils.structs import *
 from utils.utils import load_bin
-
-
-class Signals:
-    def __init__(self):
-        self.sps = 256 * 50
-        self.seq_power = None
-        self.seq_hf = None
-        self.len = -1
-        self.seq_state_arc = None
-        self.seq_state_normal = None
 
 
 class DataBase:
     def __init__(self):
         self.db = dict()
-        self.seq_len = 0
 
 
 class DataV0(DataBase):
@@ -104,7 +95,7 @@ class DataV0(DataBase):
             wavelet = 'sym2'
             logging.info(pywt.wavelist())
             max_level = pywt.dwt_max_level(seq_len, pywt.Wavelet(wavelet).dec_len)
-            level = 10
+            level = max_level
             coeffs = pywt.wavedec(np.array(seq_power).astype(float), wavelet, level=max_level)
             plt.plot(coeffs[level], label=f'{wavelet} level {level} [{max_level}]')
             ax2.set_xlim(0, len(coeffs[level]))
@@ -121,3 +112,63 @@ class DataV0(DataBase):
                 plt.show()
                 plt.pause(pause_time_s)
             plt.clf()
+
+
+class DataRT(DataBase):
+    @dataclass
+    class Signals:
+        seq_power: list = field(default_factory=list)
+        seq_state_gt_arc: list = field(default_factory=list)
+        seq_state_gt_normal: list = field(default_factory=list)
+        seq_state_pred_arc: list = field(default_factory=list)
+        seq_len: int = 0
+
+    def __init__(self):
+        super().__init__()
+        self.db['rt'] = self.Signals()
+
+    def update(self, cur_power, cur_state_gt_arc=0, cur_state_gt_normal=0):
+        self.db['rt'].seq_power.append(cur_power)
+        self.db['rt'].seq_state_gt_arc.append(cur_state_gt_arc)
+        self.db['rt'].seq_state_gt_normal.append(cur_state_gt_normal)
+        self.db['rt'].seq_len += 1
+
+    def plot(self, pause_time_s=1024, dir_save=None, show=True):
+        plt.ion()
+        fig, (ax1, ax2) = plt.subplots(2, 1)
+        key = 'rt'
+        seq_power = self.db[key].seq_power
+        seq_len = self.db[key].seq_len
+        seq_state_arc = self.db[key].seq_state_gt_arc
+        seq_state_normal = self.db[key].seq_state_gt_normal
+        time_stamps = np.array(range(seq_len))
+        ax1.plot(time_stamps, np.array(seq_power).astype(float), label='power')
+        ax1.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
+        ax1.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
+        ax1.set_xlim(0, seq_len)
+        ax1.set_ylim(0, 4096)
+        ax1.legend()
+        wavelet = 'sym2'
+        logging.info(pywt.wavelist())
+        max_level = pywt.dwt_max_level(seq_len, pywt.Wavelet(wavelet).dec_len)
+        level = max_level
+        coeffs = pywt.wavedec(np.array(seq_power).astype(float), wavelet, level=max_level)
+        plt.plot(coeffs[level], label=f'{wavelet} level {level} [{max_level}]')
+        ax2.set_xlim(0, len(coeffs[level]))
+        # val_lim = 2 ** 15
+        # ax2.set_ylim(-val_lim, val_lim)
+        ax2.legend()
+        # plt.title(f'{os.path.basename(self.dir_in)} {key}')
+        plt.tight_layout()
+        mng = plt.get_current_fig_manager()
+        mng.resize(*mng.window.maxsize())
+        if dir_save is not None:
+            plt.savefig(os.path.join(dir_save, f'{key}'))
+        if show:
+            plt.show()
+            plt.pause(pause_time_s)
+        plt.close()
+
+    def reset(self):
+        del self.db['rt']
+        self.db['rt'] = self.Signals()
