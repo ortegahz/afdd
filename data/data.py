@@ -135,29 +135,29 @@ class DataRT(DataBase):
 
     def plot(self, pause_time_s=1024, dir_save=None, show=True):
         plt.ion()
-        fig, (ax1, ax2) = plt.subplots(2, 1)
         key = 'rt'
+        wavelet, max_level = 'sym2', 4
+        # fig, (ax1, ax2) = plt.subplots(max_level + 1, 1)
         seq_power = self.db[key].seq_power
         seq_len = self.db[key].seq_len
         seq_state_arc = self.db[key].seq_state_gt_arc
         seq_state_normal = self.db[key].seq_state_gt_normal
         time_stamps = np.array(range(seq_len))
-        ax1.plot(time_stamps, np.array(seq_power).astype(float), label='power')
-        ax1.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
-        ax1.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
-        ax1.set_xlim(0, seq_len)
-        ax1.set_ylim(0, 4096)
-        ax1.legend()
-        wavelet = 'sym2'
-        logging.info(pywt.wavelist())
-        max_level = pywt.dwt_max_level(seq_len, pywt.Wavelet(wavelet).dec_len)
-        level = max_level
+        plt.subplot(max_level + 1, 1, 1)
+        plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
+        plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
+        plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
+        plt.xlim(0, seq_len)
+        plt.ylim(0, 4096)
+        plt.legend()
         coeffs = pywt.wavedec(np.array(seq_power).astype(float), wavelet, level=max_level)
-        plt.plot(coeffs[level], label=f'{wavelet} level {level} [{max_level}]')
-        ax2.set_xlim(0, len(coeffs[level]))
-        # val_lim = 2 ** 15
-        # ax2.set_ylim(-val_lim, val_lim)
-        ax2.legend()
+        for level, coeff in enumerate(coeffs[1:], start=1):
+            plt.subplot(max_level + 1, 1, level + 1)
+            plt.plot(coeffs[level], label=f'{wavelet} level {level} [{max_level}]')
+            plt.xlim(0, len(coeffs[level]))
+            # val_lim = 2 ** 15
+            # ax2.set_ylim(-val_lim, val_lim)
+            plt.legend()
         # plt.title(f'{os.path.basename(self.dir_in)} {key}')
         plt.tight_layout()
         mng = plt.get_current_fig_manager()

@@ -8,7 +8,7 @@ from utils.utils import set_logging
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--addr', default='/media/manu/data/afdd/负载抑制性试验/电容滤波')
+    parser.add_argument('--addr', default='/media/manu/data/afdd/故障电弧实验/并联碳化3KW_0.7')
     return parser.parse_args()
 
 
