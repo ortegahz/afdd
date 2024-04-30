@@ -9,6 +9,8 @@ def set_logging():
 
 
 def make_dirs(dir_root, reset=False):
+    if dir_root is None:
+        return
     if os.path.exists(dir_root) and reset:
         shutil.rmtree(dir_root)
     os.makedirs(os.path.join(dir_root), exist_ok=True)

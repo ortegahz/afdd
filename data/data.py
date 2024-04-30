@@ -133,7 +133,7 @@ class DataRT(DataBase):
         self.db['rt'].seq_state_gt_normal.append(cur_state_gt_normal)
         self.db['rt'].seq_len += 1
 
-    def plot(self, pause_time_s=1024, dir_save=None, show=True):
+    def plot(self, pause_time_s=1024, dir_save=None, save_name=None, show=True):
         plt.ion()
         key = 'rt'
         wavelet, max_level = 'sym2', 4
@@ -163,7 +163,7 @@ class DataRT(DataBase):
         mng = plt.get_current_fig_manager()
         mng.resize(*mng.window.maxsize())
         if dir_save is not None:
-            plt.savefig(os.path.join(dir_save, f'{key}'))
+            plt.savefig(os.path.join(dir_save, save_name))
         if show:
             plt.show()
             plt.pause(pause_time_s)
