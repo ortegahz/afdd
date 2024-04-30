@@ -177,6 +177,7 @@ class DataRT(DataBase):
             plt.xlim(0, seq_len)
             plt.legend()
         plt.tight_layout()
+        plt.title(save_name)
         mng = plt.get_current_fig_manager()
         mng.resize(*mng.window.maxsize())
         if show:

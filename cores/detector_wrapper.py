@@ -24,11 +24,11 @@ class DetectorWrapperV0(DetectorWrapperBase):
     format: case/<key_*>.BIN + ... + *.xlsx
     """
 
-    def __init__(self, addr, dir_save=None):
+    def __init__(self, addr, dir_save=None, key_pick=None):
         super().__init__(addr, dir_save)
         # self.pause_time_s = 0.01
         # self.plot_show = False
-        self.key_pick_idx = 1  # -1 stand for all
+        self.key_pick = key_pick
         self.arc_detector = ArcDetector()
         self.db_offline = DataV0(addr)
         self.db_offline.load()
@@ -49,8 +49,8 @@ class DetectorWrapperV0(DetectorWrapperBase):
 
     def run(self):
         case_name = os.path.basename(self.addr)
-        for i, key in enumerate(self.db_offline.db.keys()):
-            if self.key_pick_idx != -1 and i != self.key_pick_idx:
+        for key in self.db_offline.db.keys():
+            if self.key_pick is not None and key != self.key_pick:
                 continue
             self._process_single(key, case_name)
 
@@ -60,8 +60,8 @@ class DetectorWrapperV1(DetectorWrapperV0):
     format: dir/<cases>/<key_*>.BIN + ... + *.xlsx
     """
 
-    def __init__(self, addr, dir_save):
-        super().__init__(addr, dir_save)
+    def __init__(self, addr, dir_save, key_pick=None):
+        super().__init__(addr, dir_save, key_pick=key_pick)
         self.pause_time_s = 0.01
         self.plot_show = False
         self.arc_detector = ArcDetector()

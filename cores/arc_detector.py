@@ -16,17 +16,19 @@ class ArcDetector:
         self.wavelet_power_pioneer_cache = [0] * self.wavelet_max_level
         self.db = DataRT(self.wavelet_max_level)
         self.bg_lr = 1e-4
-        self.pn_lr = self.bg_lr * 10
+        self.pn_lr = self.bg_lr * 64
         self.wt_th = 2
         self.level_pick = 0
+        self.arc_win_smt_cnt = 0
 
     def infer(self):
         if self.db.db['rt'].seq_len < self.wavelet_window_size:
             return
         _delta = self.db.db['rt'].seq_wt_power_pioneer[-2][self.level_pick] - \
                  self.db.db['rt'].seq_wt_power_bg[-2][self.level_pick]
-        # logging.info(f'delta: {_delta}')
-        self.db.db['rt'].seq_state_pred_arc[-2] = 2048 if _delta > self.wt_th else 0
+        self.arc_win_smt_cnt = 256 if _delta > self.wt_th else self.arc_win_smt_cnt
+        self.arc_win_smt_cnt = self.arc_win_smt_cnt - 1 if self.arc_win_smt_cnt > 0 else 0
+        self.db.db['rt'].seq_state_pred_arc[-2] = 2048 if _delta > self.wt_th or self.arc_win_smt_cnt > 0 else 0
         self.db.db['rt'].seq_wavelet[-1] = self.wavelet_cache[:]
         self.db.db['rt'].seq_wt_power_bg[-1] = self.wavelet_power_bg_cache[:]
         self.db.db['rt'].seq_wt_power_pioneer[-1] = self.wavelet_power_pioneer_cache[:]
