@@ -118,6 +118,7 @@ class DataRT(DataBase):
     @dataclass
     class Signals:
         seq_power: list = field(default_factory=list)
+        seq_wavelet: list = field(default_factory=list)
         seq_state_gt_arc: list = field(default_factory=list)
         seq_state_gt_normal: list = field(default_factory=list)
         seq_state_pred_arc: list = field(default_factory=list)
@@ -126,39 +127,54 @@ class DataRT(DataBase):
     def __init__(self):
         super().__init__()
         self.db['rt'] = self.Signals()
+        self.wavelet_type = 'sym2'
+        self.wavelet_max_level = 1
+        self.wavelet_window_size = 256
+        self.wavelet_step = 1
+        self.wavelet_cache = [0] * self.wavelet_max_level
 
     def update(self, cur_power, cur_state_gt_arc=0, cur_state_gt_normal=0):
         self.db['rt'].seq_power.append(cur_power)
+        self.db['rt'].seq_wavelet.append([0] * self.wavelet_max_level)
         self.db['rt'].seq_state_gt_arc.append(cur_state_gt_arc)
         self.db['rt'].seq_state_gt_normal.append(cur_state_gt_normal)
         self.db['rt'].seq_len += 1
+        if self.db['rt'].seq_len < self.wavelet_window_size or self.db['rt'].seq_len % self.wavelet_step != 0:
+            return
+        seq_power_pick = self.db['rt'].seq_power[-self.wavelet_window_size:]
+        coeffs = pywt.wavedec(seq_power_pick, self.wavelet_type, level=self.wavelet_max_level)
+        for level, coeff in enumerate(coeffs[1:], start=1):
+            self.wavelet_cache[level - 1] = max(coeff)
+        self.db['rt'].seq_wavelet[-1] = self.wavelet_cache[:]
 
     def plot(self, pause_time_s=1024, dir_save=None, save_name=None, show=True):
         plt.ion()
         key = 'rt'
-        wavelet, max_level = 'sym2', 4
-        # fig, (ax1, ax2) = plt.subplots(max_level + 1, 1)
         seq_power = self.db[key].seq_power
         seq_len = self.db[key].seq_len
         seq_state_arc = self.db[key].seq_state_gt_arc
         seq_state_normal = self.db[key].seq_state_gt_normal
         time_stamps = np.array(range(seq_len))
-        plt.subplot(max_level + 1, 1, 1)
+        plt.subplot(self.wavelet_max_level + 1, 1, 1)
         plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
         plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
         plt.xlim(0, seq_len)
         plt.ylim(0, 4096)
         plt.legend()
-        coeffs = pywt.wavedec(np.array(seq_power).astype(float), wavelet, level=max_level)
-        for level, coeff in enumerate(coeffs[1:], start=1):
-            plt.subplot(max_level + 1, 1, level + 1)
-            plt.plot(coeffs[level], label=f'{wavelet} level {level} [{max_level}]')
-            plt.xlim(0, len(coeffs[level]))
-            # val_lim = 2 ** 15
-            # ax2.set_ylim(-val_lim, val_lim)
+        # wavelet, max_level = 'sym2', 4
+        # coeffs = pywt.wavedec(np.array(seq_power).astype(float), wavelet, level=max_level)
+        # for level, coeff in enumerate(coeffs[1:], start=1):
+        #     plt.subplot(max_level + 1, 1, level + 1)
+        #     plt.plot(coeffs[level], label=f'{wavelet} level {level} [{max_level}]')
+        #     plt.xlim(0, len(coeffs[level]))
+        #     plt.legend()
+        seq_wavelet = np.array(self.db[key].seq_wavelet)
+        for i in range(self.wavelet_max_level):
+            plt.subplot(self.wavelet_max_level + 1, 1, i + 2)
+            plt.plot(seq_wavelet[:, i], label=f'{self.wavelet_type} level {i + 1} [{self.wavelet_max_level}]')
+            plt.xlim(0, seq_len)
             plt.legend()
-        # plt.title(f'{os.path.basename(self.dir_in)} {key}')
         plt.tight_layout()
         mng = plt.get_current_fig_manager()
         mng.resize(*mng.window.maxsize())

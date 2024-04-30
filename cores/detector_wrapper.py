@@ -26,8 +26,9 @@ class DetectorWrapperV0(DetectorWrapperBase):
 
     def __init__(self, addr, dir_save=None):
         super().__init__(addr, dir_save)
-        self.pause_time_s = 0.01
-        self.plot_show = False
+        # self.pause_time_s = 0.01
+        # self.plot_show = False
+        self.key_pick_idx = 1  # -1 stand for all
         self.arc_detector = ArcDetector()
         self.db_offline = DataV0(addr)
         self.db_offline.load()
@@ -47,7 +48,9 @@ class DetectorWrapperV0(DetectorWrapperBase):
 
     def run(self):
         case_name = os.path.basename(self.addr)
-        for key in self.db_offline.db.keys():
+        for i, key in enumerate(self.db_offline.db.keys()):
+            if self.key_pick_idx != -1 and i != self.key_pick_idx:
+                continue
             self._process_single(key, case_name)
 
 
