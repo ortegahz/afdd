@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pywt
+from screeninfo import get_monitors
 
 from utils.macros import *
 from utils.structs import *
@@ -122,36 +123,31 @@ class DataRT(DataBase):
         seq_state_gt_arc: list = field(default_factory=list)
         seq_state_gt_normal: list = field(default_factory=list)
         seq_state_pred_arc: list = field(default_factory=list)
+        seq_wt_power_bg: list = field(default_factory=list)
+        seq_wt_power_pioneer: list = field(default_factory=list)
         seq_len: int = 0
 
-    def __init__(self):
+    def __init__(self, wavelet_max_level):
         super().__init__()
         self.db['rt'] = self.Signals()
-        self.wavelet_type = 'sym2'
-        self.wavelet_max_level = 1
-        self.wavelet_window_size = 256
-        self.wavelet_step = 1
-        self.wavelet_cache = [0] * self.wavelet_max_level
+        self.wavelet_max_level = wavelet_max_level
 
     def update(self, cur_power, cur_state_gt_arc=0, cur_state_gt_normal=0):
         self.db['rt'].seq_power.append(cur_power)
         self.db['rt'].seq_wavelet.append([0] * self.wavelet_max_level)
+        self.db['rt'].seq_state_pred_arc.append(0)
         self.db['rt'].seq_state_gt_arc.append(cur_state_gt_arc)
         self.db['rt'].seq_state_gt_normal.append(cur_state_gt_normal)
+        self.db['rt'].seq_wt_power_bg.append([0] * self.wavelet_max_level)
+        self.db['rt'].seq_wt_power_pioneer.append([0] * self.wavelet_max_level)
         self.db['rt'].seq_len += 1
-        if self.db['rt'].seq_len < self.wavelet_window_size or self.db['rt'].seq_len % self.wavelet_step != 0:
-            return
-        seq_power_pick = self.db['rt'].seq_power[-self.wavelet_window_size:]
-        coeffs = pywt.wavedec(seq_power_pick, self.wavelet_type, level=self.wavelet_max_level)
-        for level, coeff in enumerate(coeffs[1:], start=1):
-            self.wavelet_cache[level - 1] = max(coeff)
-        self.db['rt'].seq_wavelet[-1] = self.wavelet_cache[:]
 
     def plot(self, pause_time_s=1024, dir_save=None, save_name=None, show=True):
         plt.ion()
         key = 'rt'
         seq_power = self.db[key].seq_power
         seq_len = self.db[key].seq_len
+        seq_state_pred_arc = self.db[key].seq_state_pred_arc
         seq_state_arc = self.db[key].seq_state_gt_arc
         seq_state_normal = self.db[key].seq_state_gt_normal
         time_stamps = np.array(range(seq_len))
@@ -159,6 +155,7 @@ class DataRT(DataBase):
         plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
         plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
+        plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred')
         plt.xlim(0, seq_len)
         plt.ylim(0, 4096)
         plt.legend()
@@ -170,19 +167,27 @@ class DataRT(DataBase):
         #     plt.xlim(0, len(coeffs[level]))
         #     plt.legend()
         seq_wavelet = np.array(self.db[key].seq_wavelet)
+        seq_wt_power_bg = np.array(self.db[key].seq_wt_power_bg)
+        seq_wt_power_pioneer = np.array(self.db[key].seq_wt_power_pioneer)
         for i in range(self.wavelet_max_level):
             plt.subplot(self.wavelet_max_level + 1, 1, i + 2)
-            plt.plot(seq_wavelet[:, i], label=f'{self.wavelet_type} level {i + 1} [{self.wavelet_max_level}]')
+            plt.plot(seq_wavelet[:, i], label=f'level {i + 1} [{self.wavelet_max_level}]')
+            plt.plot(seq_wt_power_pioneer[:, i], label=f'seq_wt_power_pioneer')
+            plt.plot(seq_wt_power_bg[:, i], label=f'seq_wt_power_bg')
             plt.xlim(0, seq_len)
             plt.legend()
         plt.tight_layout()
         mng = plt.get_current_fig_manager()
         mng.resize(*mng.window.maxsize())
-        if dir_save is not None:
-            plt.savefig(os.path.join(dir_save, save_name))
         if show:
             plt.show()
             plt.pause(pause_time_s)
+        if dir_save is not None:
+            monitor = get_monitors()[0]
+            screen_width, screen_height = monitor.width, monitor.height
+            fig = plt.gcf()
+            fig.set_size_inches(screen_width / fig.dpi, screen_height / fig.dpi)
+            plt.savefig(os.path.join(dir_save, save_name), dpi=fig.dpi)
         plt.close()
 
     def reset(self):
