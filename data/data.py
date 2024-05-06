@@ -191,6 +191,42 @@ class DataRT(DataBase):
             plt.savefig(os.path.join(dir_save, save_name), dpi=fig.dpi)
         plt.close()
 
+    def plot_cwt(self, pause_time_s=1024, dir_save=None, save_name=None, show=True):
+        plt.ion()
+        key = 'rt'
+        seq_power = self.db[key].seq_power
+        seq_len = self.db[key].seq_len
+        seq_state_pred_arc = self.db[key].seq_state_pred_arc
+        seq_state_arc = self.db[key].seq_state_gt_arc
+        seq_state_normal = self.db[key].seq_state_gt_normal
+        time_stamps = np.array(range(seq_len))
+        plt.subplot(self.wavelet_max_level + 1, 1, 1)
+        plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
+        plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
+        plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
+        plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred')
+        plt.xlim(0, seq_len)
+        plt.ylim(0, 4096)
+        plt.legend()
+        wavelet, scales, fs = 'shan', np.arange(1, 128), 256 * 50
+        coefficients, frequencies = pywt.cwt(seq_power, scales, wavelet, 1 / fs)
+        plt.subplot(self.wavelet_max_level + 1, 1, 2)
+        plt.pcolormesh(time_stamps, frequencies, np.log1p(np.abs(coefficients)))
+        plt.tight_layout()
+        plt.title(save_name)
+        mng = plt.get_current_fig_manager()
+        mng.resize(*mng.window.maxsize())
+        if show:
+            plt.show()
+            plt.pause(pause_time_s)
+        if dir_save is not None:
+            monitor = get_monitors()[0]
+            screen_width, screen_height = monitor.width, monitor.height
+            fig = plt.gcf()
+            fig.set_size_inches(screen_width / fig.dpi, screen_height / fig.dpi)
+            plt.savefig(os.path.join(dir_save, save_name), dpi=fig.dpi)
+        plt.close()
+
     def reset(self):
         del self.db['rt']
         self.db['rt'] = self.Signals()

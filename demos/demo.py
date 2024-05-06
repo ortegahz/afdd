@@ -6,12 +6,12 @@ from utils.utils import set_logging
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--addr', default='/media/manu/data/afdd/负载抑制性试验/线路阻抗')
-    parser.add_argument('--dtr_type', default='DetectorWrapperV0')
-    parser.add_argument('--db_key', default='20210928_3')
-    # parser.add_argument('--addr', default='/media/manu/data/afdd/负载抑制性试验')
-    # parser.add_argument('--dtr_type', default='DetectorWrapperV1')
-    # parser.add_argument('--db_key', default=None)
+    # parser.add_argument('--addr', default='/media/manu/data/afdd/负载抑制性试验/线路阻抗')
+    # parser.add_argument('--dtr_type', default='DetectorWrapperV0')
+    # parser.add_argument('--db_key', default='20210928_3')
+    parser.add_argument('--addr', default='/media/manu/data/afdd/负载抑制性试验')
+    parser.add_argument('--dtr_type', default='DetectorWrapperV1')
+    parser.add_argument('--db_key', default=None)
     parser.add_argument('--dir_plot_save', default='/home/manu/tmp/demo_arc_detector_save')
     return parser.parse_args()
 
