@@ -119,12 +119,14 @@ class DataRT(DataBase):
     @dataclass
     class Signals:
         seq_power: list = field(default_factory=list)
+        seq_power_mean: list = field(default_factory=list)
         seq_wavelet: list = field(default_factory=list)
         seq_state_gt_arc: list = field(default_factory=list)
         seq_state_gt_normal: list = field(default_factory=list)
         seq_state_pred_arc: list = field(default_factory=list)
         seq_wt_power_bg: list = field(default_factory=list)
         seq_wt_power_pioneer: list = field(default_factory=list)
+        info_pred_peaks: list = field(default_factory=list)
         seq_len: int = 0
 
     def __init__(self, wavelet_max_level):
@@ -134,6 +136,7 @@ class DataRT(DataBase):
 
     def update(self, cur_power, cur_state_gt_arc=0, cur_state_gt_normal=0):
         self.db['rt'].seq_power.append(cur_power)
+        self.db['rt'].seq_power_mean.append(cur_power)
         self.db['rt'].seq_wavelet.append([0] * self.wavelet_max_level)
         self.db['rt'].seq_state_pred_arc.append(0)
         self.db['rt'].seq_state_gt_arc.append(cur_state_gt_arc)
@@ -146,16 +149,20 @@ class DataRT(DataBase):
         plt.ion()
         key = 'rt'
         seq_power = self.db[key].seq_power
+        seq_power_mean = self.db[key].seq_power_mean
         seq_len = self.db[key].seq_len
         seq_state_pred_arc = self.db[key].seq_state_pred_arc
         seq_state_arc = self.db[key].seq_state_gt_arc
         seq_state_normal = self.db[key].seq_state_gt_normal
+        info_pred_peaks = self.db[key].info_pred_peaks
         time_stamps = np.array(range(seq_len))
         plt.subplot(self.wavelet_max_level + 1, 1, 1)
         plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
         plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
         plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred')
+        plt.plot(time_stamps, np.array(seq_power_mean).astype(float), label='power_mean')
+        plt.plot(info_pred_peaks, np.array(seq_power).astype(float)[info_pred_peaks], 'x', label='peaks')
         plt.xlim(0, seq_len)
         plt.ylim(0, 4096)
         plt.legend()
