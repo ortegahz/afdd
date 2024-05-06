@@ -26,7 +26,7 @@ class ArcDetector:
             return
         _delta = self.db.db['rt'].seq_wt_power_pioneer[-2][self.level_pick] - \
                  self.db.db['rt'].seq_wt_power_bg[-2][self.level_pick]
-        self.arc_win_smt_cnt = 256 if _delta > self.wt_th else self.arc_win_smt_cnt
+        self.arc_win_smt_cnt = 512 if _delta > self.wt_th else self.arc_win_smt_cnt
         self.arc_win_smt_cnt = self.arc_win_smt_cnt - 1 if self.arc_win_smt_cnt > 0 else 0
         self.db.db['rt'].seq_state_pred_arc[-2] = 2048 if _delta > self.wt_th or self.arc_win_smt_cnt > 0 else 0
         self.db.db['rt'].seq_wavelet[-1] = self.wavelet_cache[:]
