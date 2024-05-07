@@ -127,6 +127,7 @@ class DataRT(DataBase):
         seq_wt_power_bg: list = field(default_factory=list)
         seq_wt_power_pioneer: list = field(default_factory=list)
         info_pred_peaks: list = field(default_factory=list)
+        info_af_scores: list = field(default_factory=list)
         seq_len: int = 0
 
     def __init__(self, wavelet_max_level):
@@ -155,6 +156,7 @@ class DataRT(DataBase):
         seq_state_arc = self.db[key].seq_state_gt_arc
         seq_state_normal = self.db[key].seq_state_gt_normal
         info_pred_peaks = self.db[key].info_pred_peaks
+        info_af_scores = self.db[key].info_af_scores
         time_stamps = np.array(range(seq_len))
         plt.subplot(self.wavelet_max_level + 1, 1, 1)
         plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
@@ -163,6 +165,13 @@ class DataRT(DataBase):
         plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred')
         plt.plot(time_stamps, np.array(seq_power_mean).astype(float), label='power_mean')
         plt.plot(info_pred_peaks, np.array(seq_power).astype(float)[info_pred_peaks], 'x', label='peaks')
+        for i, peak in enumerate(info_pred_peaks):
+            plt.annotate(f'{info_af_scores[i]}',
+                         (peak, seq_power[peak]),
+                         textcoords="offset points",
+                         xytext=(0, 10),
+                         ha='center',
+                         arrowprops=dict(arrowstyle="->", color='black'))
         plt.xlim(0, seq_len)
         plt.ylim(0, 4096)
         plt.legend()

@@ -32,9 +32,18 @@ class ArcDetector:
         idx_e = self.arc_pred_win_e - self.arc_pred_win_shift
         seq_pick = self.db.db['rt'].seq_power[idx_s:idx_e]
         peaks_idx, _ = find_peaks(seq_pick, height=self.power_mean + 128, distance=128)
+        af_cnt = 0
+        for i in range(len(peaks_idx) - 1):
+            peak_s, peak_e = peaks_idx[i], peaks_idx[i + 1]
+            seq_pick_t = np.array(seq_pick[peak_s:peak_e]).astype(float)
+            seq_pick_t_delta = np.abs(seq_pick_t - self.power_mean)
+            af_score = len(seq_pick_t_delta[seq_pick_t_delta < 4])
+            self.db.db['rt'].info_af_scores.append(af_score)
+            af_cnt = af_cnt + 1 if af_score > 16 else 0
+        self.db.db['rt'].info_af_scores.append(0)
         peaks_idx = idx_s + np.array(peaks_idx)
         self.db.db['rt'].info_pred_peaks.extend(peaks_idx.tolist())
-        return True
+        return af_cnt > 4
 
     def infer(self):
         # if self.db.db['rt'].seq_len < self.wavelet_window_size:
@@ -48,7 +57,7 @@ class ArcDetector:
             self.db.db['rt'].seq_len if _delta > self.wt_th and self.arc_win_smt_cnt == 0 else self.arc_pred_win_s
         self.arc_win_smt_cnt = 16384 if _delta > self.wt_th else self.arc_win_smt_cnt
         self.arc_win_smt_cnt = self.arc_win_smt_cnt - 1 if self.arc_win_smt_cnt > 0 else 0
-        self.db.db['rt'].seq_state_pred_arc[-self.arc_pred_win_shift] = self.indicator_max_val \
+        self.db.db['rt'].seq_state_pred_arc[-self.arc_pred_win_shift] = self.indicator_max_val / 2 \
             if _delta > self.wt_th or self.arc_win_smt_cnt > 0 else 0
         self.db.db['rt'].seq_wavelet[-1] = self.wavelet_cache[:]
         self.db.db['rt'].seq_wt_power_bg[-1] = self.wavelet_power_bg_cache[:]
@@ -57,7 +66,8 @@ class ArcDetector:
         self.arc_pred_win_e = \
             self.db.db['rt'].seq_len if self.arc_pred_win_s > 0 and self.arc_win_smt_cnt == 0 else self.arc_pred_win_e
         if self.arc_pred_win_s > 0 and self.arc_pred_win_e > 0:
-            self._af_eval()
+            if self._af_eval():
+                self.db.db['rt'].seq_state_pred_arc[self.arc_pred_win_s] = self.indicator_max_val
             self.arc_pred_win_s, self.arc_pred_win_e = -1, -1
         if self.db.db['rt'].seq_len % self.wavelet_step != 0:
             return
