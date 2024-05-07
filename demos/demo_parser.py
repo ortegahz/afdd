@@ -6,8 +6,8 @@ from utils.utils import set_logging
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--addr', default='/media/manu/data/afdd/负载抑制性试验/电容滤波')
-    parser.add_argument('--db_type', default='DataV0')
+    parser.add_argument('--addr', default='/home/manu/tmp/1.4-1.csv')
+    parser.add_argument('--db_type', default='DataV1')
     parser.add_argument('--dir_plot_save', default='/home/manu/tmp/afdd_demo_parser_save')
     return parser.parse_args()
 

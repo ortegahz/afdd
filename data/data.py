@@ -115,6 +115,49 @@ class DataV0(DataBase):
             plt.clf()
 
 
+class DataV1(DataBase):
+    @dataclass
+    class Signals:
+        seq_adc: list = field(default_factory=list)
+        seq_len: int = 0
+
+    def __init__(self, dir_in):
+        super().__init__()
+        self.path_in = dir_in
+        self.db['default'] = self.Signals()
+
+    def load(self):
+        data = pd.read_csv(self.path_in, header=10)
+        signal = data.iloc[:, 1]
+        self.db['default'].seq_adc = signal.tolist()
+        self.db['default'].seq_len = len(self.db['default'].seq_adc)
+
+    def plot(self, pause_time_s=1024, dir_save=None, show=True, save_name=None):
+        plt.ion()
+        key = 'default'
+        seq_adc = self.db[key].seq_adc
+        seq_len = self.db[key].seq_len
+        time_stamps = np.array(range(seq_len))
+        plt.plot(time_stamps, np.array(seq_adc).astype(float), label='seq_adc')
+        plt.xlim(0, seq_len)
+        plt.ylim(-8, 8)
+        plt.legend()
+        plt.tight_layout()
+        plt.title(save_name)
+        mng = plt.get_current_fig_manager()
+        mng.resize(*mng.window.maxsize())
+        if show:
+            plt.show()
+            plt.pause(pause_time_s)
+        if dir_save is not None:
+            monitor = get_monitors()[0]
+            screen_width, screen_height = monitor.width, monitor.height
+            fig = plt.gcf()
+            fig.set_size_inches(screen_width / fig.dpi, screen_height / fig.dpi)
+            plt.savefig(os.path.join(dir_save, save_name), dpi=fig.dpi)
+        plt.close()
+
+
 class DataRT(DataBase):
     @dataclass
     class Signals:
