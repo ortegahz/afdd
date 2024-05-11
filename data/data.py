@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pywt
+from PyEMD import EMD
 from screeninfo import get_monitors
 
 from utils.macros import *
@@ -131,6 +132,8 @@ class DataV1(DataBase):
         signal = data.iloc[:, 1]
         self.db['default'].seq_adc = signal.tolist()
         self.db['default'].seq_len = len(self.db['default'].seq_adc)
+        _seq_adc_set = set(self.db['default'].seq_adc)
+        logging.info(f'[{len(_seq_adc_set)}] {_seq_adc_set}')
 
     def plot(self, pause_time_s=1024, dir_save=None, show=True, save_name=None):
         plt.ion()
@@ -273,6 +276,39 @@ class DataRT(DataBase):
         plt.pcolormesh(time_stamps, frequencies, np.log1p(np.abs(coefficients)))
         plt.tight_layout()
         plt.title(save_name)
+        mng = plt.get_current_fig_manager()
+        mng.resize(*mng.window.maxsize())
+        if show:
+            plt.show()
+            plt.pause(pause_time_s)
+        if dir_save is not None:
+            monitor = get_monitors()[0]
+            screen_width, screen_height = monitor.width, monitor.height
+            fig = plt.gcf()
+            fig.set_size_inches(screen_width / fig.dpi, screen_height / fig.dpi)
+            plt.savefig(os.path.join(dir_save, save_name), dpi=fig.dpi)
+        plt.close()
+
+    def plot_emd(self, pause_time_s=1024, dir_save=None, save_name=None, show=True):
+        plt.ion()
+        key = 'rt'
+        idx_s = 410000
+        seq_power = self.db[key].seq_power[idx_s:idx_s + 2048]
+        seq_len = len(seq_power)
+        time_stamps = np.array(range(seq_len))
+        emd = EMD()
+        imfs = emd(np.array(seq_power).astype(float))
+        plt.subplot(len(imfs) + 1, 1, 1)
+        plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
+        plt.xlim(0, seq_len)
+        plt.ylim(0, 4096)
+        plt.legend()
+        for i, imf in enumerate(imfs):
+            plt.subplot(len(imfs) + 1, 1, i + 2)
+            plt.plot(time_stamps, imf, 'g')
+            plt.title('imfs ' + str(i + 1))
+            plt.ylim(-2048, 2048)
+        plt.tight_layout()
         mng = plt.get_current_fig_manager()
         mng.resize(*mng.window.maxsize())
         if show:
