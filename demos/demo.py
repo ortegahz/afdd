@@ -6,9 +6,9 @@ from utils.utils import set_logging
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v0/故障电弧实验/并联金属3KW_0.7')
+    parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v0/故障电弧实验/并联碳化3KW_1')
     parser.add_argument('--dtr_type', default='DetectorWrapperV0')
-    parser.add_argument('--db_key', default='20210916')
+    parser.add_argument('--db_key', default='20210928_1')
     # parser.add_argument('--addr', default='/media/manu/data/afdd/误动作实验')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV1')
     # parser.add_argument('--db_key', default=None)

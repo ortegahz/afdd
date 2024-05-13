@@ -128,7 +128,7 @@ class DataV1(DataBase):
         self.db['default'] = self.Signals()
 
     def load(self):
-        data = pd.read_csv(self.path_in, header=10)
+        data = pd.read_csv(self.path_in, header=16)
         signal = data.iloc[:, 1]
         self.db['default'].seq_adc = signal.tolist()
         self.db['default'].seq_len = len(self.db['default'].seq_adc)
