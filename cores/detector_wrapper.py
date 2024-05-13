@@ -42,13 +42,13 @@ class DetectorWrapperV0(DetectorWrapperBase):
             self.arc_detector.db.update(cur_power=cur_power,
                                         cur_state_gt_arc=cur_state_gt_arc,
                                         cur_state_gt_normal=cur_state_gt_normal)
-            # self.arc_detector.infer()
-        # self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
-        #                           save_name=f'{case_name}_{key}.png', show=self.plot_show)
+            self.arc_detector.infer()
+        self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
+                                  save_name=f'{case_name}_{key}.png', show=self.plot_show)
         # self.arc_detector.db.plot_cwt(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
         #                           save_name=f'{case_name}_{key}.png', show=self.plot_show)
-        self.arc_detector.db.plot_emd(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
-                                      save_name=f'{case_name}_{key}.png', show=self.plot_show)
+        # self.arc_detector.db.plot_emd(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
+        #                               save_name=f'{case_name}_{key}.png', show=self.plot_show)
         self.arc_detector.db.reset()
 
     def run(self):

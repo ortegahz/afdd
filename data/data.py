@@ -135,7 +135,7 @@ class DataV1(DataBase):
         _seq_adc_set = set(self.db['default'].seq_adc)
         logging.info(f'[{len(_seq_adc_set)}] {_seq_adc_set}')
 
-    def plot(self, pause_time_s=1024, dir_save=None, show=True, save_name=None):
+    def plot(self, pause_time_s=1024, dir_save=None, show=False, save_name=None):
         plt.ion()
         key = 'default'
         seq_adc = self.db[key].seq_adc
@@ -143,7 +143,7 @@ class DataV1(DataBase):
         time_stamps = np.array(range(seq_len))
         plt.plot(time_stamps, np.array(seq_adc).astype(float), label='seq_adc')
         plt.xlim(0, seq_len)
-        plt.ylim(-8, 8)
+        # plt.ylim(-8, 8)
         plt.legend()
         plt.tight_layout()
         plt.title(save_name)
@@ -157,7 +157,7 @@ class DataV1(DataBase):
             screen_width, screen_height = monitor.width, monitor.height
             fig = plt.gcf()
             fig.set_size_inches(screen_width / fig.dpi, screen_height / fig.dpi)
-            plt.savefig(os.path.join(dir_save, save_name), dpi=fig.dpi)
+            plt.savefig(os.path.join(dir_save, save_name + '.png'), dpi=fig.dpi)
         plt.close()
 
 

@@ -1,3 +1,5 @@
+import os.path
+
 from data.data import *
 from utils.utils import make_dirs
 
@@ -22,7 +24,9 @@ class ParserV0(ParserBase):
         self.dir_in = addr_in
 
     def parse(self):
+        _basename = os.path.basename(self.dir_in)
+        _name, _ = os.path.splitext(_basename)
         logging.info(self.dir_in)
         db_obj = eval(self.db_type)(self.dir_in)
         db_obj.load()
-        db_obj.plot(dir_save=self.dir_plot_save)
+        db_obj.plot(dir_save=self.dir_plot_save, save_name=_name)
