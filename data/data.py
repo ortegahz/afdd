@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pywt
+import scipy.io
 from PyEMD import EMD
 from screeninfo import get_monitors
 
@@ -159,6 +160,16 @@ class DataV1(DataBase):
             fig.set_size_inches(screen_width / fig.dpi, screen_height / fig.dpi)
             plt.savefig(os.path.join(dir_save, save_name + '.png'), dpi=fig.dpi)
         plt.close()
+
+
+class DataV2(DataV1):
+    def __init__(self, dir_in):
+        super().__init__(dir_in)
+
+    def load(self):
+        _mat = scipy.io.loadmat(self.path_in)
+        self.db['default'].seq_adc = _mat['A'].flatten().tolist()[::10]
+        self.db['default'].seq_len = len(self.db['default'].seq_adc)
 
 
 class DataRT(DataBase):
