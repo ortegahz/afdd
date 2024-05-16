@@ -8,7 +8,7 @@ from data.data import DataRT
 class ArcDetector:
     def __init__(self):
         self.power_mean = -1
-        self.pm_lr = 1e-5
+        self.pm_lr = 1e-4
         self.wavelet_type = 'sym2'
         self.wavelet_max_level = 1
         self.wavelet_window_size = 256
@@ -26,6 +26,10 @@ class ArcDetector:
         self.arc_pred_win_shift = 4096
         self.arc_pred_win_s = -1
         self.arc_pred_win_e = -1
+        self.peak_eval_win = list()
+        self.peak_eval_win_size = 128
+        self.af_win_size = 256
+        self.last_peak_idx = -1
 
     def _af_eval(self):
         idx_s = self.arc_pred_win_s - self.arc_pred_win_shift
@@ -45,7 +49,7 @@ class ArcDetector:
         self.db.db['rt'].info_pred_peaks.extend(peaks_idx.tolist())
         return af_cnt > 4
 
-    def infer(self):
+    def infer_v0(self):
         # if self.db.db['rt'].seq_len < self.wavelet_window_size:
         if self.db.db['rt'].seq_len < self.arc_pred_win_shift:
             return
@@ -80,3 +84,39 @@ class ArcDetector:
             self.wavelet_power_pioneer_cache[level - 1] = \
                 self.wavelet_power_pioneer_cache[level - 1] * (1 - self.pn_lr) + max(coeff) * self.pn_lr
         self.power_mean = self.power_mean * (1 - self.pm_lr) + self.db.db['rt'].seq_power[-1] * self.pm_lr
+
+    def _detect_peak(self, cur_val, win_size=256, peak_th=0):
+        self.peak_eval_win.append(cur_val)
+        self.peak_eval_win = self.peak_eval_win[-win_size:]
+        if len(self.peak_eval_win) < win_size:
+            return -1
+        peak_candidate_idx = win_size // 2
+        if self.peak_eval_win[peak_candidate_idx] == max(self.peak_eval_win) and \
+                self.peak_eval_win[peak_candidate_idx] > peak_th:
+            self.peak_eval_win.clear()
+            return peak_candidate_idx
+        return -1
+
+    def infer_v1(self):
+        if self.db.db['rt'].seq_len < self.af_win_size * 2:
+            return
+        power_pick = self.db.db['rt'].seq_power[-1]
+        self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
+            else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
+        self.db.db['rt'].seq_power_mean[-1] = self.power_mean
+        peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size, peak_th=self.power_mean + 128)
+        peak_idx = self.db.db['rt'].seq_len - self.peak_eval_win_size // 2 if peak_idx_norm > 0 else -1
+        if peak_idx < 0:
+            return
+        _seq_pick = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
+        _seq_pick_delta = np.abs(_seq_pick - self.power_mean)
+        # _delta_th = (self.db.db['rt'].seq_power[peak_idx] - self.power_mean) / 16.
+        _delta_th = 16
+        _delta_score = len(_seq_pick_delta[_seq_pick_delta < _delta_th])
+        _af_score = _delta_score if peak_idx - self.last_peak_idx < self.af_win_size * 2 else 0
+        self.db.db['rt'].info_af_scores.append(_af_score)
+        self.db.db['rt'].info_pred_peaks.append(peak_idx)
+        if _af_score > 16 or self.db.db['rt'].seq_power[peak_idx] > 4096 - 128:
+            self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
+                [self.indicator_max_val] * self.af_win_size
+        self.last_peak_idx = peak_idx

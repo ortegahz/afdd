@@ -129,7 +129,7 @@ class DataV1(DataBase):
         self.db['default'] = self.Signals()
 
     def load(self):
-        data = pd.read_csv(self.path_in, header=16)
+        data = pd.read_csv(self.path_in, header=3)
         signal = data.iloc[:, 1]
         self.db['default'].seq_adc = signal.tolist()
         self.db['default'].seq_len = len(self.db['default'].seq_adc)
@@ -142,7 +142,11 @@ class DataV1(DataBase):
         seq_adc = self.db[key].seq_adc
         seq_len = self.db[key].seq_len
         time_stamps = np.array(range(seq_len))
-        plt.plot(time_stamps, np.array(seq_adc).astype(float), label='seq_adc')
+        # seq_adc_filtered = [64.0 if '∞' in str(item) else item for item in seq_adc]
+        seq_adc_np = np.array(seq_adc)
+        seq_adc_np[seq_adc_np == '∞'] = 64.0
+        seq_adc_np[seq_adc_np == '-∞'] = -64.0
+        plt.plot(time_stamps, seq_adc_np.astype(float), label='seq_adc')
         plt.xlim(0, seq_len)
         # plt.ylim(-8, 8)
         plt.legend()
@@ -168,7 +172,7 @@ class DataV2(DataV1):
 
     def load(self):
         _mat = scipy.io.loadmat(self.path_in)
-        self.db['default'].seq_adc = _mat['A'].flatten().tolist()[::10]
+        self.db['default'].seq_adc = _mat['A'].flatten().tolist()[::1]
         self.db['default'].seq_len = len(self.db['default'].seq_adc)
 
 
@@ -217,9 +221,9 @@ class DataRT(DataBase):
         time_stamps = np.array(range(seq_len))
         plt.subplot(self.wavelet_max_level + 1, 1, 1)
         plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
+        plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred')
         plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
-        plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred')
         plt.plot(time_stamps, np.array(seq_power_mean).astype(float), label='power_mean')
         plt.plot(info_pred_peaks, np.array(seq_power).astype(float)[info_pred_peaks], 'x', label='peaks')
         for i, peak in enumerate(info_pred_peaks):

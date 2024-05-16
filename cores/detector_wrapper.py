@@ -42,7 +42,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
             self.arc_detector.db.update(cur_power=cur_power,
                                         cur_state_gt_arc=cur_state_gt_arc,
                                         cur_state_gt_normal=cur_state_gt_normal)
-            self.arc_detector.infer()
+            self.arc_detector.infer_v1()
         self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
                                   save_name=f'{case_name}_{key}.png', show=self.plot_show)
         # self.arc_detector.db.plot_cwt(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
@@ -71,12 +71,14 @@ class DetectorWrapperV1(DetectorWrapperV0):
         self.arc_detector = ArcDetector()
 
     def run(self):
-        cases_dir = glob.glob(os.path.join(self.addr, '*/'))
+        _cnt = 0
+        cases_dir = glob.glob(os.path.join(self.addr, '*'))
         for case_dir in cases_dir:
             logging.info(f'case_dir: {case_dir}')
-            case_name = os.path.basename(case_dir[:-1])
+            case_name = os.path.basename(case_dir)
             # logging.info(f'case_name: {case_name}')
             self.db_offline = DataV0(case_dir)
             self.db_offline.load()
             for key in self.db_offline.db.keys():
-                self._process_single(key, case_name)
+                self._process_single(key, f'{_cnt}_' + case_name)
+                _cnt += 1
