@@ -1,8 +1,16 @@
+import logging
+import os
+import random
+import sys
+from subprocess import *
+
 import numpy as np
 import pywt
+from scipy.signal import butter, lfilter_zi, lfilter
 from scipy.signal import find_peaks
 
 from data.data import DataRT
+from utils.macros import *
 
 
 class ArcDetector:
@@ -22,14 +30,57 @@ class ArcDetector:
         self.wt_th = 2
         self.level_pick = 0
         self.arc_win_smt_cnt = 0
-        self.indicator_max_val = 2048
+        self.indicator_max_val = 4096
         self.arc_pred_win_shift = 4096
         self.arc_pred_win_s = -1
         self.arc_pred_win_e = -1
         self.peak_eval_win = list()
         self.peak_eval_win_size = 128
-        self.af_win_size = 256
+        self.af_win_size = int(SAMPLE_RATE / 50)
         self.last_peak_idx = -1
+        self.sample_rate = SAMPLE_RATE  # 256 * 50
+        self.filter_cutoff_freq = 4096  # hz
+        self.filter_order = 4
+        self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter()
+        self.filter_zi = self.filter_zi_org
+        self.sample_win_size = self.sample_rate  # 1s
+        self.sample_cnt = 0
+        self.samples_neg, self.samples_pos = list(), list()
+
+    @staticmethod
+    def _update_svm_label_file(seq_pick, path_out='/home/manu/tmp/smartsd', subset='neg'):
+        idx_feat = 0
+        with open(path_out, 'a') as f:
+            label = '+1' if 'pos' in subset else '-1'
+            f.write(label + ' ')
+            for feat in seq_pick:
+                f.write(f'{idx_feat + 1}:{feat} ')
+                idx_feat += 1
+        with open(path_out, 'a') as f:
+            f.write('\n')
+
+    def save_samples(self, path_save='/home/manu/tmp/smartsd'):
+        if len(self.samples_neg) > len(self.samples_pos):
+            self.samples_neg = random.sample(self.samples_neg, len(self.samples_pos))
+        logging.info(f'len self.samples_pos -> {len(self.samples_pos)}')
+        logging.info(f'len self.samples_neg -> {len(self.samples_neg)}')
+        for seq_pick in self.samples_pos:
+            self._update_svm_label_file(seq_pick, path_out=path_save, subset='pos')
+        for seq_pick in self.samples_neg:
+            self._update_svm_label_file(seq_pick, path_out=path_save, subset='neg')
+
+    def reset(self):
+        self.samples_neg.clear()
+        self.samples_pos.clear()
+        self.filter_zi = self.filter_zi_org
+        self.db.reset()
+
+    def _design_highpass_filter(self):
+        nyq = 0.5 * self.sample_rate
+        normal_cutoff = self.filter_cutoff_freq / nyq
+        b, a = butter(self.filter_order, normal_cutoff, btype='high', analog=False)
+        zi = lfilter_zi(b, a)
+        return b, a, zi
 
     def _af_eval(self):
         idx_s = self.arc_pred_win_s - self.arc_pred_win_shift
@@ -97,26 +148,73 @@ class ArcDetector:
             return peak_candidate_idx
         return -1
 
+    def _svm_infer(self, seq, suffix='', path_label='./rtsvm', dir_libsvm='/home/manu/nfs/libsvm'):
+        is_win32 = (sys.platform == 'win32')
+        if is_win32:
+            svmscale_exe = os.path.join(dir_libsvm, 'windows', 'svm-scale.exe')
+            svmpredict_exe = os.path.join(dir_libsvm, 'windows', 'svm-predict.exe')
+        else:
+            svmscale_exe = os.path.join(dir_libsvm, 'svm-scale')
+            svmpredict_exe = os.path.join(dir_libsvm, 'svm-predict')
+        # range_file = os.path.join(dir_libsvm, 'tools', 'smartsd_time.range')
+        # model_file = os.path.join(dir_libsvm, 'tools', 'smartsd_time.model')
+        range_file = os.path.join(dir_libsvm, 'tools', 'smartsd' + suffix + '.range')
+        model_file = os.path.join(dir_libsvm, 'tools', 'smartsd' + suffix + '.model')
+        test_pathname = path_label
+        scaled_test_file = path_label + '.scale'
+        predict_test_file = path_label + '.predict'
+        if os.path.exists(path_label):
+            os.remove(path_label)
+        self._update_svm_label_file(seq, path_label)
+        cmd = '{0} -l 0 -u 1 -r "{1}" "{2}" > "{3}"'.format(svmscale_exe, range_file, test_pathname, scaled_test_file)
+        Popen(cmd, shell=True, stdout=PIPE).communicate()
+        cmd = '{0} -b 0 "{1}" "{2}" "{3}"'.format(svmpredict_exe, scaled_test_file, model_file, predict_test_file)
+        Popen(cmd, shell=True).communicate()
+        with open(predict_test_file) as f:
+            lines = f.readlines()
+        # return int(lines[1].split(' ')[0])
+        return int(lines[0].strip())
+
+    def _realtime_highpass_filter(self, cur_sample):
+        y, zo = lfilter(self.filter_b, self.filter_a, [cur_sample], zi=self.filter_zi)
+        return y[0], zo
+
     def infer_v1(self):
+        filtered_sample, self.filter_zi = self._realtime_highpass_filter(self.db.db['rt'].seq_power[-1])
+        self.db.db['rt'].seq_filtered[-1] = filtered_sample
         if self.db.db['rt'].seq_len < self.af_win_size * 2:
             return
+        self.sample_cnt = self.sample_win_size if filtered_sample > 2 else self.sample_cnt
+        self.sample_cnt = self.sample_cnt - 1 if self.sample_cnt > 0 else self.sample_cnt
         power_pick = self.db.db['rt'].seq_power[-1]
         self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
             else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
         self.db.db['rt'].seq_power_mean[-1] = self.power_mean
-        peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size, peak_th=self.power_mean + 128)
+        peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size, peak_th=self.power_mean + 8)
         peak_idx = self.db.db['rt'].seq_len - self.peak_eval_win_size // 2 if peak_idx_norm > 0 else -1
         if peak_idx < 0:
             return
         _seq_pick = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
         _seq_pick_delta = np.abs(_seq_pick - self.power_mean)
         # _delta_th = (self.db.db['rt'].seq_power[peak_idx] - self.power_mean) / 16.
-        _delta_th = 16
+        _delta_th = (self.db.db['rt'].seq_power[peak_idx] - self.power_mean) * 0.016
         _delta_score = len(_seq_pick_delta[_seq_pick_delta < _delta_th])
         _af_score = _delta_score if peak_idx - self.last_peak_idx < self.af_win_size * 2 else 0
         self.db.db['rt'].info_af_scores.append(_af_score)
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
-        if _af_score > 16 or self.db.db['rt'].seq_power[peak_idx] > 4096 - 128:
-            self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
-                [self.indicator_max_val] * self.af_win_size
+        # if _af_score > 16 or self.db.db['rt'].seq_power[peak_idx] > 4096 - 128:
+        state_gt_arc = self.db.db['rt'].seq_state_gt_arc[-1]
+        if self.sample_cnt > 0:
+            _seq_pick = self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]
+            # _svm_score = self._svm_infer(_seq_pick)
+            # self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
+            #     [_svm_score * self.indicator_max_val] * self.af_win_size
+            if state_gt_arc > 0:
+                self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
+                    [self.indicator_max_val / 2] * self.af_win_size
+                self.samples_pos.append(_seq_pick)
+            else:
+                self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
+                    [self.indicator_max_val / 4] * self.af_win_size
+                self.samples_neg.append(_seq_pick)
         self.last_peak_idx = peak_idx

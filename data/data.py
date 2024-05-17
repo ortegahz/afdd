@@ -52,7 +52,9 @@ class DataV0(DataBase):
             alarm_interval_0 = row[alarm_index].split('~') if pd.notna(row[alarm_index]) else None
             normal_interval_0 = row[normal_index].split('~') if pd.notna(row[normal_index]) else None
             if alarm_interval_0 is not None:
-                self.db[key].seq_state_arc[int(alarm_interval_0[0]):int(alarm_interval_0[1])] = STATE_INDICATE_VAL
+                _idx_s, _idx_e = int(alarm_interval_0[0]), int(alarm_interval_0[1])
+                _idx_s, _idx_e = max(0, _idx_s), min(self.db[key].len, _idx_e)
+                self.db[key].seq_state_arc[_idx_s:_idx_e] = STATE_INDICATE_VAL
             if normal_interval_0 is not None:
                 self.db[key].seq_state_normal[int(normal_interval_0[0]):int(normal_interval_0[1])] = \
                     STATE_INDICATE_VAL / 2
@@ -61,7 +63,10 @@ class DataV0(DataBase):
                 next_normal_col = normal_index + i
                 if next_alarm_col < len(df.columns) and pd.notna(row[next_alarm_col]):
                     next_alarm_interval = row[next_alarm_col].split('~')
-                    self.db[key].seq_state_arc[int(next_alarm_interval[0]):int(next_alarm_interval[1])] = \
+                    _idx_s, _idx_e = \
+                        int(next_alarm_interval[0]), int(next_alarm_interval[1])
+                    _idx_s, _idx_e = max(0, _idx_s), min(self.db[key].len, _idx_e)
+                    self.db[key].seq_state_arc[_idx_s:_idx_e] = \
                         STATE_INDICATE_VAL
                 if next_normal_col < len(df.columns) and pd.notna(row[next_normal_col]):
                     next_normal_interval = row[next_normal_col].split('~')
@@ -180,11 +185,14 @@ class DataRT(DataBase):
     @dataclass
     class Signals:
         seq_power: list = field(default_factory=list)
+        seq_hf: list = field(default_factory=list)
+        seq_filtered: list = field(default_factory=list)
         seq_power_mean: list = field(default_factory=list)
         seq_wavelet: list = field(default_factory=list)
         seq_state_gt_arc: list = field(default_factory=list)
         seq_state_gt_normal: list = field(default_factory=list)
         seq_state_pred_arc: list = field(default_factory=list)
+        seq_state_pred_classifier: list = field(default_factory=list)
         seq_wt_power_bg: list = field(default_factory=list)
         seq_wt_power_pioneer: list = field(default_factory=list)
         info_pred_peaks: list = field(default_factory=list)
@@ -196,11 +204,14 @@ class DataRT(DataBase):
         self.db['rt'] = self.Signals()
         self.wavelet_max_level = wavelet_max_level
 
-    def update(self, cur_power, cur_state_gt_arc=0, cur_state_gt_normal=0):
+    def update(self, cur_power, cur_hf=0, cur_state_gt_arc=0, cur_state_gt_normal=0):
         self.db['rt'].seq_power.append(cur_power)
+        self.db['rt'].seq_hf.append(cur_hf)
+        self.db['rt'].seq_filtered.append(0)
         self.db['rt'].seq_power_mean.append(cur_power)
         self.db['rt'].seq_wavelet.append([0] * self.wavelet_max_level)
         self.db['rt'].seq_state_pred_arc.append(0)
+        self.db['rt'].seq_state_pred_classifier.append(0)
         self.db['rt'].seq_state_gt_arc.append(cur_state_gt_arc)
         self.db['rt'].seq_state_gt_normal.append(cur_state_gt_normal)
         self.db['rt'].seq_wt_power_bg.append([0] * self.wavelet_max_level)
@@ -211,9 +222,12 @@ class DataRT(DataBase):
         plt.ion()
         key = 'rt'
         seq_power = self.db[key].seq_power
+        seq_hf = self.db[key].seq_hf
+        seq_filtered = self.db[key].seq_filtered
         seq_power_mean = self.db[key].seq_power_mean
         seq_len = self.db[key].seq_len
         seq_state_pred_arc = self.db[key].seq_state_pred_arc
+        seq_state_pred_classifier = self.db[key].seq_state_pred_classifier
         seq_state_arc = self.db[key].seq_state_gt_arc
         seq_state_normal = self.db[key].seq_state_gt_normal
         info_pred_peaks = self.db[key].info_pred_peaks
@@ -221,6 +235,7 @@ class DataRT(DataBase):
         time_stamps = np.array(range(seq_len))
         plt.subplot(self.wavelet_max_level + 1, 1, 1)
         plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
+        plt.plot(time_stamps, np.array(seq_state_pred_classifier).astype(float), label='seq_state_pred_classifier')
         plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred')
         plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
@@ -235,6 +250,12 @@ class DataRT(DataBase):
                          arrowprops=dict(arrowstyle="->", color='black'))
         plt.xlim(0, seq_len)
         plt.ylim(0, 4096)
+        plt.legend()
+        plt.subplot(self.wavelet_max_level + 1, 1, 2)
+        plt.plot(time_stamps, np.array(seq_filtered).astype(float), label='seq_filtered')
+        plt.plot(time_stamps, np.array(seq_hf).astype(float), label='seq_hf')
+        plt.xlim(0, seq_len)
+        plt.ylim(0, 16)
         plt.legend()
         # wavelet, max_level = 'sym2', 4
         # coeffs = pywt.wavedec(np.array(seq_power).astype(float), wavelet, level=max_level)
