@@ -187,6 +187,7 @@ class DataRT(DataBase):
         seq_power: list = field(default_factory=list)
         seq_hf: list = field(default_factory=list)
         seq_filtered: list = field(default_factory=list)
+        seq_filter_envelope: list = field(default_factory=list)
         seq_power_mean: list = field(default_factory=list)
         seq_wavelet: list = field(default_factory=list)
         seq_state_gt_arc: list = field(default_factory=list)
@@ -208,6 +209,7 @@ class DataRT(DataBase):
         self.db['rt'].seq_power.append(cur_power)
         self.db['rt'].seq_hf.append(cur_hf)
         self.db['rt'].seq_filtered.append(0)
+        self.db['rt'].seq_filter_envelope.append(0)
         self.db['rt'].seq_power_mean.append(cur_power)
         self.db['rt'].seq_wavelet.append([0] * self.wavelet_max_level)
         self.db['rt'].seq_state_pred_arc.append(0)
@@ -224,6 +226,7 @@ class DataRT(DataBase):
         seq_power = self.db[key].seq_power
         seq_hf = self.db[key].seq_hf
         seq_filtered = self.db[key].seq_filtered
+        seq_filter_envelope = self.db[key].seq_filter_envelope
         seq_power_mean = self.db[key].seq_power_mean
         seq_len = self.db[key].seq_len
         seq_state_pred_arc = self.db[key].seq_state_pred_arc
@@ -254,6 +257,7 @@ class DataRT(DataBase):
         plt.subplot(self.wavelet_max_level + 1, 1, 2)
         plt.plot(time_stamps, np.array(seq_filtered).astype(float), label='seq_filtered')
         plt.plot(time_stamps, np.array(seq_hf).astype(float), label='seq_hf')
+        plt.plot(time_stamps, np.array(seq_filter_envelope).astype(float), label='seq_filter_envelope')
         plt.xlim(0, seq_len)
         plt.ylim(0, 16)
         plt.legend()

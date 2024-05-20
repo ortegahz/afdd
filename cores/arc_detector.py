@@ -6,8 +6,7 @@ from subprocess import *
 
 import numpy as np
 import pywt
-from scipy.signal import butter, lfilter_zi, lfilter
-from scipy.signal import find_peaks
+from scipy.signal import *
 
 from data.data import DataRT
 from utils.macros import *
@@ -39,13 +38,16 @@ class ArcDetector:
         self.af_win_size = int(SAMPLE_RATE / 50)
         self.last_peak_idx = -1
         self.sample_rate = SAMPLE_RATE  # 256 * 50
-        self.filter_cutoff_freq = 4096  # hz
+        self.filter_cutoff_freq = 256  # hz
         self.filter_order = 4
         self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter()
         self.filter_zi = self.filter_zi_org
         self.sample_win_size = self.sample_rate  # 1s
-        self.sample_cnt = 0
+        self.sample_cnt = 1024
         self.samples_neg, self.samples_pos = list(), list()
+        self.seq_template = None
+        self.seq_template_idx = -1
+        self.filter_max, self.filter_th, self.filter_th_cnt = -1, -1, 0
 
     @staticmethod
     def _update_svm_label_file(seq_pick, path_out='/home/manu/tmp/smartsd', subset='neg'):
@@ -70,6 +72,7 @@ class ArcDetector:
             self._update_svm_label_file(seq_pick, path_out=path_save, subset='neg')
 
     def reset(self):
+        self.filter_max, self.filter_th, self.filter_th_cnt = -1, -1, 0
         self.samples_neg.clear()
         self.samples_pos.clear()
         self.filter_zi = self.filter_zi_org
@@ -78,7 +81,11 @@ class ArcDetector:
     def _design_highpass_filter(self):
         nyq = 0.5 * self.sample_rate
         normal_cutoff = self.filter_cutoff_freq / nyq
-        b, a = butter(self.filter_order, normal_cutoff, btype='high', analog=False)
+        # b, a = butter(self.filter_order, normal_cutoff, btype='high', analog=False)
+        # rp = 1
+        # b, a = cheby1(self.filter_order, rp, normal_cutoff, btype='high', analog=False)
+        rs = 64
+        b, a = cheby2(self.filter_order, rs, normal_cutoff, btype='high', analog=False)
         zi = lfilter_zi(b, a)
         return b, a, zi
 
@@ -182,10 +189,15 @@ class ArcDetector:
     def infer_v1(self):
         filtered_sample, self.filter_zi = self._realtime_highpass_filter(self.db.db['rt'].seq_power[-1])
         self.db.db['rt'].seq_filtered[-1] = filtered_sample
-        if self.db.db['rt'].seq_len < self.af_win_size * 2:
+        if self.db.db['rt'].seq_len < self.af_win_size * 2:  # waiting for _seq_pick_last
             return
-        self.sample_cnt = self.sample_win_size if filtered_sample > 2 else self.sample_cnt
-        self.sample_cnt = self.sample_cnt - 1 if self.sample_cnt > 0 else self.sample_cnt
+        # self.filter_max = filtered_sample if self.filter_max < filtered_sample else self.filter_max
+        # self.filter_th_cnt = self.filter_th_cnt + 1 if filtered_sample > self.filter_th else self.filter_th_cnt
+        # if filtered_sample > self.filter_th and self.filter_th_cnt > SAMPLE_RATE:
+        #     self.filter_th, self.filter_th_cnt = self.filter_max, 0
+        # self.db.db['rt'].seq_filter_envelope[-1] = self.filter_th
+        # self.sample_cnt = self.sample_win_size if filtered_sample > 2 else self.sample_cnt
+        # self.sample_cnt = self.sample_cnt - 1 if self.sample_cnt > 0 else self.sample_cnt
         power_pick = self.db.db['rt'].seq_power[-1]
         self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
             else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
@@ -200,12 +212,14 @@ class ArcDetector:
         _delta_th = (self.db.db['rt'].seq_power[peak_idx] - self.power_mean) * 0.016
         _delta_score = len(_seq_pick_delta[_seq_pick_delta < _delta_th])
         _af_score = _delta_score if peak_idx - self.last_peak_idx < self.af_win_size * 2 else 0
+        # logging.info(peak_idx - self.seq_template_idx)
+        # _af_score = np.mean(np.abs(_seq_pick - self.seq_template)) if self.seq_template is not None else 0
+        # self.seq_template, self.seq_template_idx = _seq_pick, peak_idx
         self.db.db['rt'].info_af_scores.append(_af_score)
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
         # if _af_score > 16 or self.db.db['rt'].seq_power[peak_idx] > 4096 - 128:
         state_gt_arc = self.db.db['rt'].seq_state_gt_arc[-1]
         if self.sample_cnt > 0:
-            _seq_pick = self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]
             # _svm_score = self._svm_infer(_seq_pick)
             # self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
             #     [_svm_score * self.indicator_max_val] * self.af_win_size

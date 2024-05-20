@@ -2,6 +2,8 @@ import logging
 import os
 import shutil
 
+import numpy as np
+
 
 def set_logging():
     logger = logging.getLogger()
@@ -26,3 +28,15 @@ def load_bin(path, int_size=2):
             integer = int.from_bytes(bytes_read, 'little')
             int_list.append(integer)
     return int_list
+
+
+def svm_label2data(path_label):
+    with open(path_label, 'r') as file:
+        lines = file.readlines()
+    x, y = list(), list()
+    for line in lines:
+        line_lst = line.strip().split(' ')
+        logging.info(line_lst)
+        y.append(int(line_lst[0]))
+        x.append([float(item.split(':')[1]) for item in line_lst[1:]])
+    return np.array(x).astype(np.float32), np.array(y).astype(np.int64)
