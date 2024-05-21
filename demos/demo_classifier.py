@@ -4,13 +4,12 @@ import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
-import xgboost as xgb
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from xgboost import plot_importance
 
 from cores.classifier import ClassifierXGB
-from utils.utils import set_logging, svm_label2data, feature_engineering
+from utils.utils import set_logging, svm_label2data
 
 
 def parse_args():
