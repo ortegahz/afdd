@@ -24,13 +24,7 @@ def run(args):
     logging.info(args)
     X, y = svm_label2data(args.path_label)
     y[y < 0] = 0
-    X = feature_engineering(X)
-    # iris = load_iris()
-    # X, y = iris.data, iris.target
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    feature_names = [str(i) if i < 256 else 'f' + str(i) for i in range(X.shape[1])]
-    dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_names)
-    dtest = xgb.DMatrix(X_test, label=y_test, feature_names=feature_names)
     num_pos = np.sum(y_train == 1)
     num_neg = np.sum(y_train == 0)
     scale_pos_weight = num_neg / num_pos
@@ -44,12 +38,12 @@ def run(args):
     }
     logging.info(f'params -> {params}')
     classifier = ClassifierXGB(params)
-    classifier.train(dtrain)
+    classifier.train(X_train, y_train)
     with open(args.path_save, 'wb') as f:
         pickle.dump(classifier, f)
     with open(args.path_save, 'rb') as f:
         classifier = pickle.load(f)
-    preds = classifier.infer(dtest)
+    preds = classifier.infer(X_test, y_test)
     preds = [1 if prob > 0.5 else 0 for prob in preds]
     accuracy = accuracy_score(y_test, preds)
     logging.info(f'acc -> {accuracy}')
