@@ -1,10 +1,12 @@
 import glob
 import logging
 import os
+import pickle
 
 from cores.arc_detector import ArcDetector
 from data.data import DataV0
 from utils.utils import make_dirs
+from cores.classifier import ClassifierXGB
 
 
 class DetectorWrapperBase:
@@ -33,7 +35,8 @@ class DetectorWrapperV0(DetectorWrapperBase):
         self.db_offline = DataV0(addr)
         self.db_offline.load()
         self.svm_label_file = svm_label_file
-        os.remove(self.svm_label_file)
+        if os.path.exists(self.svm_label_file):
+            os.remove(self.svm_label_file)
 
     def _process_single(self, key, case_name):
         db_offline_single = self.db_offline.db[key]

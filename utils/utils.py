@@ -36,7 +36,15 @@ def svm_label2data(path_label):
     x, y = list(), list()
     for line in lines:
         line_lst = line.strip().split(' ')
-        logging.info(line_lst)
+        # logging.info(line_lst)
         y.append(int(line_lst[0]))
         x.append([float(item.split(':')[1]) for item in line_lst[1:]])
     return np.array(x).astype(np.float32), np.array(y).astype(np.int64)
+
+
+def feature_engineering(data):
+    data_array = np.array(data)
+    fft_values = np.fft.fft(data_array)
+    fft_magnitude = np.abs(fft_values)
+    data_new = np.concatenate([data_array, fft_magnitude], axis=1)
+    return data_new

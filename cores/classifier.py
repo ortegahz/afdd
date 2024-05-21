@@ -7,15 +7,9 @@ class ClassifierBase:
 
 
 class ClassifierXGB(ClassifierBase):
-    def __init__(self):
+    def __init__(self, params):
         super().__init__()
-        self.params = {
-            'max_depth': 3,
-            'eta': 0.1,
-            'objective': 'binary:logistic',
-            # 'objective': 'multi:softmax',
-            # 'num_class': 3,
-        }
+        self.params = params
         self.model = None
 
     def train(self, data, num_boost_round=100):

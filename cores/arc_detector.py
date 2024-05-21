@@ -1,5 +1,6 @@
 import logging
 import os
+import pickle
 import random
 import sys
 from subprocess import *
@@ -10,10 +11,14 @@ from scipy.signal import *
 
 from data.data import DataRT
 from utils.macros import *
+import xgboost as xgb
+from utils.utils import feature_engineering
 
 
 class ArcDetector:
     def __init__(self):
+        with open('/home/manu/tmp/model.pickle', 'rb') as f:
+            self.classifier = pickle.load(f)
         self.power_mean = -1
         self.pm_lr = 1e-4
         self.wavelet_type = 'sym2'
@@ -62,8 +67,8 @@ class ArcDetector:
             f.write('\n')
 
     def save_samples(self, path_save='/home/manu/tmp/smartsd'):
-        if len(self.samples_neg) > len(self.samples_pos):
-            self.samples_neg = random.sample(self.samples_neg, len(self.samples_pos))
+        # if len(self.samples_neg) > len(self.samples_pos):
+        #     self.samples_neg = random.sample(self.samples_neg, len(self.samples_pos))
         logging.info(f'len self.samples_pos -> {len(self.samples_pos)}')
         logging.info(f'len self.samples_neg -> {len(self.samples_neg)}')
         for seq_pick in self.samples_pos:
@@ -221,8 +226,11 @@ class ArcDetector:
         state_gt_arc = self.db.db['rt'].seq_state_gt_arc[-1]
         if self.sample_cnt > 0:
             # _svm_score = self._svm_infer(_seq_pick)
-            # self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
-            #     [_svm_score * self.indicator_max_val] * self.af_win_size
+            _data = feature_engineering(_seq_pick[np.newaxis, :])
+            _data = xgb.DMatrix(_data)
+            _score = self.classifier.infer(_data)[0]
+            self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
+                [_score * self.indicator_max_val] * self.af_win_size
             if state_gt_arc > 0:
                 self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
                     [self.indicator_max_val / 2] * self.af_win_size
