@@ -226,8 +226,7 @@ class ArcDetector:
         state_gt_arc = self.db.db['rt'].seq_state_gt_arc[-1]
         if self.sample_cnt > 0:
             # _svm_score = self._svm_infer(_seq_pick)
-            _data = feature_engineering(_seq_pick[np.newaxis, :])
-            _data = xgb.DMatrix(_data)
+            _data = _seq_pick[np.newaxis, :]
             _score = self.classifier.infer(_data)[0]
             self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
                 [_score * self.indicator_max_val] * self.af_win_size
