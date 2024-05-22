@@ -12,7 +12,7 @@ class FeaturesGeneratorXGB(FeaturesGeneratorBase):
     def __init__(self):
         super().__init__()
         self.feature_names = None
-        self.feature_methods = [self._features_fft_generate, self._features_wt_generate]
+        self.feature_methods = [self._features_dummy_generate]
 
     @staticmethod
     def _features_fft_generate(data, num_intervals=64):
@@ -27,12 +27,12 @@ class FeaturesGeneratorXGB(FeaturesGeneratorBase):
         return features, feature_names
 
     @staticmethod
-    def _features_dummy_generate(data, num_intervals=16):
+    def _features_dummy_generate(data, num_intervals=64):
         data_array = np.array(data)
         interval_length = data_array.shape[1] // num_intervals
         data_array_pick = data_array[:, :interval_length * num_intervals][:, np.newaxis, :]
         data_array_pick_reshape = data_array_pick.reshape(len(data_array), -1, interval_length)
-        features = np.mean(data_array_pick_reshape, axis=2)
+        features = np.mean(data_array_pick_reshape ** 2, axis=2)
         feature_names = [f'dummy_{i}' for i in range(num_intervals)]
         return features, feature_names
 

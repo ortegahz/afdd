@@ -14,7 +14,7 @@ from utils.utils import set_logging, svm_label2data
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--path_label', default='/home/manu/tmp/afd_v0')
+    parser.add_argument('--path_label', default='/home/manu/tmp/afd_v1')
     parser.add_argument('--path_save', default='/home/manu/tmp/model.pickle')
     return parser.parse_args()
 

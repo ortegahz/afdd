@@ -1,12 +1,10 @@
 import glob
 import logging
 import os
-import pickle
 
 from cores.arc_detector import ArcDetector
 from data.data import DataV0
 from utils.utils import make_dirs
-from cores.classifier import ClassifierXGB
 
 
 class DetectorWrapperBase:
@@ -91,3 +89,31 @@ class DetectorWrapperV1(DetectorWrapperV0):
             for key in self.db_offline.db.keys():
                 self._process_single(key, f'{_cnt}_' + case_name)
                 _cnt += 1
+
+
+class DetectorWrapperV2(DetectorWrapperV1):
+    """
+    format: <cases_type>/<cases>/<key_*>.BIN + ... + *.xlsx
+    """
+
+    def __init__(self, addr, dir_save, key_pick=None):
+        super().__init__(addr, dir_save, key_pick=key_pick)
+        self.pause_time_s = 0.01
+        self.plot_show = False
+        self.arc_detector = ArcDetector()
+
+    def run(self):
+        _cnt = 0
+        cases_types_dir = glob.glob(os.path.join(self.addr, '*'))
+        for cases_type_dir in cases_types_dir:
+            logging.info(f'cases_type_dir: {cases_type_dir}')
+            cases_dir = glob.glob(os.path.join(cases_type_dir, '*'))
+            for case_dir in cases_dir:
+                logging.info(f'case_dir: {case_dir}')
+                case_name = os.path.basename(case_dir)
+                # logging.info(f'case_name: {case_name}')
+                self.db_offline = DataV0(case_dir)
+                self.db_offline.load()
+                for key in self.db_offline.db.keys():
+                    self._process_single(key, f'{_cnt}_' + case_name)
+                    _cnt += 1
