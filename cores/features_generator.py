@@ -12,11 +12,11 @@ class FeaturesGeneratorXGB(FeaturesGeneratorBase):
     def __init__(self):
         super().__init__()
         self.feature_names = None
-        self.feature_methods = [self._features_dummy_generate]
+        self.feature_methods = [self._features_hf_generate]
 
     @staticmethod
     def _features_fft_generate(data, num_intervals=64):
-        data_array = np.array(data)
+        data_array = np.array(data[:, :256])
         fft_values = np.fft.fft(data_array)
         fft_magnitude = np.abs(fft_values)
         interval_length = fft_magnitude.shape[1] // num_intervals
@@ -28,7 +28,7 @@ class FeaturesGeneratorXGB(FeaturesGeneratorBase):
 
     @staticmethod
     def _features_dummy_generate(data, num_intervals=64):
-        data_array = np.array(data)
+        data_array = np.array(data[:, :256])
         interval_length = data_array.shape[1] // num_intervals
         data_array_pick = data_array[:, :interval_length * num_intervals][:, np.newaxis, :]
         data_array_pick_reshape = data_array_pick.reshape(len(data_array), -1, interval_length)
@@ -37,13 +37,26 @@ class FeaturesGeneratorXGB(FeaturesGeneratorBase):
         return features, feature_names
 
     @staticmethod
+    def _features_hf_generate(data, num_intervals=64):
+        data_array = np.array(data[:, 256:])
+        interval_length = data_array.shape[1] // num_intervals
+        data_array_pick = data_array[:, :interval_length * num_intervals][:, np.newaxis, :]
+        data_array_pick_reshape = data_array_pick.reshape(len(data_array), -1, interval_length)
+        features = np.mean(data_array_pick_reshape ** 2, axis=2)
+        feature_names = [f'hf_{i}' for i in range(num_intervals)]
+        return features, feature_names
+
+    @staticmethod
     def _features_wt_generate(data, wavelet_type='sym2', wavelet_max_level=4):
-        features = np.zeros((data.shape[0], wavelet_max_level))
+        data = np.array(data[:, :256])
+        features = np.zeros((data.shape[0], wavelet_max_level + wavelet_max_level))
         for index, signal in enumerate(data):
             coeffs = pywt.wavedec(signal, wavelet_type, level=wavelet_max_level)
             for level, coeff in enumerate(coeffs[1:], start=1):
-                features[index, level - 1] = np.mean(coeff ** 2)
-        feature_names = [f'wt_level_{i}_avg' for i in range(1, wavelet_max_level + 1)]
+                _tmp = np.mean(coeff ** 2) / np.max(np.abs(data))
+                features[index, level - 1] = _tmp
+                features[index, level - 1 + wavelet_max_level] = np.mean(coeff ** 2)
+        feature_names = [f'wt_level_{i}_avg' for i in range(1, wavelet_max_level + 1 + wavelet_max_level)]
         return features, feature_names
 
     def generate(self, x, y=None):

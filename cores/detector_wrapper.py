@@ -47,8 +47,8 @@ class DetectorWrapperV0(DetectorWrapperBase):
                                         cur_hf=cur_hf,
                                         cur_state_gt_arc=cur_state_gt_arc,
                                         cur_state_gt_normal=cur_state_gt_normal)
-            # self.arc_detector.infer_v0()
-            self.arc_detector.infer_v1()
+            self.arc_detector.infer_v2()
+            # self.arc_detector.sample()
         self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
                                   save_name=f'{case_name}_{key}.png', show=self.plot_show)
         # self.arc_detector.db.plot_cwt(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
@@ -83,7 +83,7 @@ class DetectorWrapperV1(DetectorWrapperV0):
         for case_dir in cases_dir:
             logging.info(f'case_dir: {case_dir}')
             case_name = os.path.basename(case_dir)
-            # logging.info(f'case_name: {case_name}')
+            logging.info(f'case_name: {case_name}')
             self.db_offline = DataV0(case_dir)
             self.db_offline.load()
             for key in self.db_offline.db.keys():
@@ -105,11 +105,11 @@ class DetectorWrapperV2(DetectorWrapperV1):
     def run(self):
         _cnt = 0
         cases_types_dir = glob.glob(os.path.join(self.addr, '*'))
-        for cases_type_dir in cases_types_dir:
-            logging.info(f'cases_type_dir: {cases_type_dir}')
+        for i, cases_type_dir in enumerate(cases_types_dir):
+            logging.info(f'[{len(cases_types_dir)}] {i}th cases_type_dir: {cases_type_dir}')
             cases_dir = glob.glob(os.path.join(cases_type_dir, '*'))
-            for case_dir in cases_dir:
-                logging.info(f'case_dir: {case_dir}')
+            for j, case_dir in enumerate(cases_dir):
+                logging.info(f'[{len(cases_dir)}] {j}th case_dir: {case_dir}')
                 case_name = os.path.basename(case_dir)
                 # logging.info(f'case_name: {case_name}')
                 self.db_offline = DataV0(case_dir)

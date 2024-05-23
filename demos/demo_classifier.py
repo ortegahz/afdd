@@ -14,7 +14,7 @@ from utils.utils import set_logging, svm_label2data
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--path_label', default='/home/manu/tmp/afd_v1')
+    parser.add_argument('--path_label', default='/home/manu/tmp/afd_v2')
     parser.add_argument('--path_save', default='/home/manu/tmp/model.pickle')
     return parser.parse_args()
 
@@ -27,6 +27,7 @@ def run(args):
     num_pos = np.sum(y_train == 1)
     num_neg = np.sum(y_train == 0)
     scale_pos_weight = num_neg / num_pos
+    # scale_pos_weight = 16
     params = {
         'max_depth': 3,
         'eta': 0.1,
