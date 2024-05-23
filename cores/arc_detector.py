@@ -1,7 +1,5 @@
-import logging
 import os
 import pickle
-import random
 import sys
 from subprocess import *
 
@@ -11,8 +9,6 @@ from scipy.signal import *
 
 from data.data import DataRT
 from utils.macros import *
-import xgboost as xgb
-from utils.utils import feature_engineering
 
 
 class ArcDetector:
@@ -53,6 +49,11 @@ class ArcDetector:
         self.seq_template = None
         self.seq_template_idx = -1
         self.filter_max, self.filter_th, self.filter_th_cnt = -1, -1, 0
+        self.alarm_arc_cnt = 0
+        self.alarm_arc_th = 1400 / self.indicator_max_val
+        self.alarm_arc_descend_peak_cnt = 0
+        self.alarm_arc_idx = -1
+        self.alarm_arc_descend_exit = False
 
     @staticmethod
     def _update_svm_label_file(seq_pick, path_out='/home/manu/tmp/smartsd', subset='neg'):
@@ -69,14 +70,20 @@ class ArcDetector:
     def save_samples(self, path_save='/home/manu/tmp/smartsd'):
         # if len(self.samples_neg) > len(self.samples_pos):
         #     self.samples_neg = random.sample(self.samples_neg, len(self.samples_pos))
-        logging.info(f'len self.samples_pos -> {len(self.samples_pos)}')
-        logging.info(f'len self.samples_neg -> {len(self.samples_neg)}')
+        # logging.info(f'len self.samples_pos -> {len(self.samples_pos)}')
+        # logging.info(f'len self.samples_neg -> {len(self.samples_neg)}')
         for seq_pick in self.samples_pos:
             self._update_svm_label_file(seq_pick, path_out=path_save, subset='pos')
         for seq_pick in self.samples_neg:
             self._update_svm_label_file(seq_pick, path_out=path_save, subset='neg')
 
     def reset(self):
+        self.alarm_arc_descend_exit = False
+        self.alarm_arc_idx = -1
+        self.alarm_arc_descend_peak_cnt = 0
+        self.last_peak_idx = -1
+        self.peak_eval_win.clear()
+        self.alarm_arc_cnt = 0
         self.filter_max, self.filter_th, self.filter_th_cnt = -1, -1, 0
         self.samples_neg.clear()
         self.samples_pos.clear()
@@ -239,3 +246,74 @@ class ArcDetector:
                     [self.indicator_max_val / 4] * self.af_win_size
                 self.samples_neg.append(_seq_pick)
         self.last_peak_idx = peak_idx
+
+    def infer_v2(self):
+        if self.db.db['rt'].seq_len < self.af_win_size:  # waiting for enough data
+            return
+        power_pick = self.db.db['rt'].seq_power[-1]
+        self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
+            else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
+        self.db.db['rt'].seq_power_mean[-1] = self.power_mean
+        peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size, peak_th=self.power_mean + 8)
+        peak_idx = self.db.db['rt'].seq_len - self.peak_eval_win_size // 2 if peak_idx_norm > 0 else -1
+        if peak_idx < 0:  # seq filter
+            self.alarm_arc_cnt = self.alarm_arc_cnt - 0.0001 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt
+            self.alarm_arc_cnt = self.alarm_arc_cnt + 0.001 if self.alarm_arc_cnt < 0 else self.alarm_arc_cnt
+            # self.alarm_arc_cnt = max(0, self.alarm_arc_cnt)
+            return
+        _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
+        _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
+        _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
+        self.db.db['rt'].info_pred_peaks.append(peak_idx)
+        _data = _seq_pick[np.newaxis, :]
+        _score = self.classifier.infer(_data)[0]
+        self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
+            [_score * self.indicator_max_val] * self.af_win_size
+        _delta_peak = self.db.db['rt'].seq_power[peak_idx] - self.db.db['rt'].seq_power[self.last_peak_idx]
+        _alarm_arc_th = 2800 / self.indicator_max_val
+        self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _score > _alarm_arc_th else self.alarm_arc_cnt
+        self.alarm_arc_descend_peak_cnt = self.alarm_arc_descend_peak_cnt + 1 if _delta_peak < 0 else 0
+        # self.alarm_arc_cnt = self.alarm_arc_cnt - 32 if self.alarm_arc_descend_peak_cnt > 4 and self.alarm_arc_idx > 0 \
+        #     else self.alarm_arc_cnt
+        # if self.alarm_arc_descend_peak_cnt > 4 and self.alarm_arc_idx > 0:
+        #     self.alarm_arc_descend_exit = True
+        # self.alarm_arc_cnt = max(self.alarm_arc_cnt, 0)
+        self.db.db['rt'].info_af_scores.append(self.alarm_arc_cnt)
+        if self.alarm_arc_cnt > 4:  # pre-alarm
+            self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
+                [self.indicator_max_val / 2] * self.af_win_size
+            # self.alarm_arc_cnt = 0
+            self.alarm_arc_idx = peak_idx if self.alarm_arc_idx == -1 else self.alarm_arc_idx  # record pre-alarm idx
+        if self.alarm_arc_idx > 0 and peak_idx - self.alarm_arc_idx > self.af_win_size * 16:
+            if self.alarm_arc_cnt > 4:
+                self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx - self.af_win_size:self.alarm_arc_idx] = \
+                    [self.indicator_max_val] * self.af_win_size
+            self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
+                [self.indicator_max_val / 4 * 3] * self.af_win_size
+            # self.alarm_arc_descend_exit = False
+            self.alarm_arc_idx = -1
+            self.alarm_arc_cnt = 0
+        self.last_peak_idx = peak_idx
+
+    def sample(self):
+        if self.db.db['rt'].seq_len < self.af_win_size:  # waiting for enough data
+            return
+        power_pick = self.db.db['rt'].seq_power[-1]
+        self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
+            else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
+        self.db.db['rt'].seq_power_mean[-1] = self.power_mean
+        peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size, peak_th=self.power_mean + 8)
+        peak_idx = self.db.db['rt'].seq_len - self.peak_eval_win_size // 2 if peak_idx_norm > 0 else -1
+        if peak_idx < 0:  # seq filter
+            return
+        _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
+        _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
+        _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
+        if self.db.db['rt'].seq_state_gt_arc[-1] > 0:
+            self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
+                [self.indicator_max_val / 2] * self.af_win_size
+            self.samples_pos.append(_seq_pick)
+        else:
+            self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
+                [self.indicator_max_val / 4] * self.af_win_size
+            self.samples_neg.append(_seq_pick)
