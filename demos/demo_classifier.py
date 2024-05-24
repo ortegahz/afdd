@@ -26,14 +26,12 @@ def run(args):
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     num_pos = np.sum(y_train == 1)
     num_neg = np.sum(y_train == 0)
-    scale_pos_weight = num_neg / num_pos
+    scale_pos_weight = num_neg / num_pos * 0.1
     # scale_pos_weight = 16
     params = {
         'max_depth': 3,
         'eta': 0.1,
         'objective': 'binary:logistic',
-        # 'objective': 'multi:softmax',
-        # 'num_class': 3,
         'scale_pos_weight': scale_pos_weight,
     }
     logging.info(f'params -> {params}')

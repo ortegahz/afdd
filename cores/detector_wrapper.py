@@ -80,8 +80,8 @@ class DetectorWrapperV1(DetectorWrapperV0):
     def run(self):
         _cnt = 0
         cases_dir = glob.glob(os.path.join(self.addr, '*'))
-        for case_dir in cases_dir:
-            logging.info(f'case_dir: {case_dir}')
+        for i, case_dir in enumerate(cases_dir):
+            logging.info(f'[{len(cases_dir)}] {i}th case_dir: {case_dir}')
             case_name = os.path.basename(case_dir)
             logging.info(f'case_name: {case_name}')
             self.db_offline = DataV0(case_dir)

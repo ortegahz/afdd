@@ -12,7 +12,7 @@ class FeaturesGeneratorXGB(FeaturesGeneratorBase):
     def __init__(self):
         super().__init__()
         self.feature_names = None
-        self.feature_methods = [self._features_hf_generate]
+        self.feature_methods = [self._features_dummy_generate]
 
     @staticmethod
     def _features_fft_generate(data, num_intervals=64):
@@ -49,14 +49,12 @@ class FeaturesGeneratorXGB(FeaturesGeneratorBase):
     @staticmethod
     def _features_wt_generate(data, wavelet_type='sym2', wavelet_max_level=4):
         data = np.array(data[:, :256])
-        features = np.zeros((data.shape[0], wavelet_max_level + wavelet_max_level))
+        features = np.zeros((data.shape[0], wavelet_max_level))
         for index, signal in enumerate(data):
             coeffs = pywt.wavedec(signal, wavelet_type, level=wavelet_max_level)
             for level, coeff in enumerate(coeffs[1:], start=1):
-                _tmp = np.mean(coeff ** 2) / np.max(np.abs(data))
-                features[index, level - 1] = _tmp
-                features[index, level - 1 + wavelet_max_level] = np.mean(coeff ** 2)
-        feature_names = [f'wt_level_{i}_avg' for i in range(1, wavelet_max_level + 1 + wavelet_max_level)]
+                features[index, level - 1] = np.mean(coeff ** 2)
+        feature_names = [f'wt_level_{i}_avg' for i in range(1, wavelet_max_level + 1)]
         return features, feature_names
 
     def generate(self, x, y=None):

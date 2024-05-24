@@ -1,3 +1,4 @@
+import logging
 import os
 import pickle
 import sys
@@ -52,8 +53,11 @@ class ArcDetector:
         self.alarm_arc_cnt = 0
         self.alarm_arc_th = 1400 / self.indicator_max_val
         self.alarm_arc_descend_peak_cnt = 0
-        self.alarm_arc_idx = -1
+        self.alarm_arc_idx_s = -1
+        self.alarm_arc_idx_e = -1
         self.alarm_arc_descend_exit = False
+        self.alarm_arc_state = 0
+        self.peak_miss_cnt = 0
 
     @staticmethod
     def _update_svm_label_file(seq_pick, path_out='/home/manu/tmp/smartsd', subset='neg'):
@@ -78,8 +82,11 @@ class ArcDetector:
             self._update_svm_label_file(seq_pick, path_out=path_save, subset='neg')
 
     def reset(self):
+        self.peak_miss_cnt = 0
+        self.alarm_arc_state = 0
+        self.alarm_arc_idx_e = -1
         self.alarm_arc_descend_exit = False
-        self.alarm_arc_idx = -1
+        self.alarm_arc_idx_s = -1
         self.alarm_arc_descend_peak_cnt = 0
         self.last_peak_idx = -1
         self.peak_eval_win.clear()
@@ -250,6 +257,29 @@ class ArcDetector:
     def infer_v2(self):
         if self.db.db['rt'].seq_len < self.af_win_size:  # waiting for enough data
             return
+        self.alarm_arc_idx_e = self.last_peak_idx if self.peak_miss_cnt > self.af_win_size * 4 else self.alarm_arc_idx_e
+        if self.alarm_arc_idx_e > 0 and self.alarm_arc_idx_s > 0:
+            _delta_peak = \
+                self.db.db['rt'].seq_power[self.alarm_arc_idx_s] - self.db.db['rt'].seq_power[self.alarm_arc_idx_e]
+            logging.info(f'_delta_peak --> {_delta_peak}')
+            self.alarm_arc_cnt = self.alarm_arc_cnt - 16 if _delta_peak > 272 else self.alarm_arc_cnt
+            _alarm_arc_end_idx = self.last_peak_idx
+            _idx_e = self.alarm_arc_idx_e + self.af_win_size * 4
+            _idx_e = _idx_e if _idx_e < self.db.db['rt'].seq_len else self.db.db['rt'].seq_len
+            _seq_pick_hf_alarm = \
+                np.array(
+                    self.db.db['rt'].seq_hf[self.alarm_arc_idx_s - self.af_win_size:_idx_e]).astype(float)
+            _hf_cnt = np.sum(_seq_pick_hf_alarm > 0)
+            logging.info(f'_hf_cnt --> {_hf_cnt}')
+            logging.info(f'self.alarm_arc_cnt --> {self.alarm_arc_cnt}')
+            logging.info(f'self.alarm_arc_idx_s --> {self.alarm_arc_idx_s}')
+            logging.info(f'self.last_peak_idx --> {self.last_peak_idx}')
+            if _hf_cnt > 0 and self.alarm_arc_cnt > 4:
+                logging.info(f'alarm idx --> {self.last_peak_idx}')
+                self.db.db['rt'].seq_state_pred_arc[self.last_peak_idx - self.af_win_size:self.last_peak_idx] = \
+                    [self.indicator_max_val] * self.af_win_size
+                self.alarm_arc_state = 0
+            self.alarm_arc_idx_s, self.alarm_arc_idx_e = -1, -1
         power_pick = self.db.db['rt'].seq_power[-1]
         self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
             else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
@@ -257,10 +287,12 @@ class ArcDetector:
         peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size, peak_th=self.power_mean + 8)
         peak_idx = self.db.db['rt'].seq_len - self.peak_eval_win_size // 2 if peak_idx_norm > 0 else -1
         if peak_idx < 0:  # seq filter
-            self.alarm_arc_cnt = self.alarm_arc_cnt - 0.0001 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt
+            self.alarm_arc_cnt = self.alarm_arc_cnt - 0.001 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt
             self.alarm_arc_cnt = self.alarm_arc_cnt + 0.001 if self.alarm_arc_cnt < 0 else self.alarm_arc_cnt
             # self.alarm_arc_cnt = max(0, self.alarm_arc_cnt)
+            self.peak_miss_cnt += 1
             return
+        self.peak_miss_cnt = 0
         _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
         _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
         _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
@@ -270,29 +302,23 @@ class ArcDetector:
         self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
             [_score * self.indicator_max_val] * self.af_win_size
         _delta_peak = self.db.db['rt'].seq_power[peak_idx] - self.db.db['rt'].seq_power[self.last_peak_idx]
-        _alarm_arc_th = 2800 / self.indicator_max_val
+        _alarm_arc_th = 1024 / self.indicator_max_val
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _score > _alarm_arc_th else self.alarm_arc_cnt
-        self.alarm_arc_descend_peak_cnt = self.alarm_arc_descend_peak_cnt + 1 if _delta_peak < 0 else 0
-        # self.alarm_arc_cnt = self.alarm_arc_cnt - 32 if self.alarm_arc_descend_peak_cnt > 4 and self.alarm_arc_idx > 0 \
-        #     else self.alarm_arc_cnt
-        # if self.alarm_arc_descend_peak_cnt > 4 and self.alarm_arc_idx > 0:
-        #     self.alarm_arc_descend_exit = True
-        # self.alarm_arc_cnt = max(self.alarm_arc_cnt, 0)
+        # self.alarm_arc_descend_peak_cnt = self.alarm_arc_descend_peak_cnt + 1 if _delta_peak < 0 else 0
+        # self.alarm_arc_cnt = self.alarm_arc_cnt - 4 if self.alarm_arc_descend_peak_cnt > 4 else self.alarm_arc_cnt
         self.db.db['rt'].info_af_scores.append(self.alarm_arc_cnt)
+        self.alarm_arc_idx_s = peak_idx if self.alarm_arc_idx_s < 0 and _score > _alarm_arc_th else self.alarm_arc_idx_s
+        self.alarm_arc_idx_e = peak_idx if self.alarm_arc_idx_s > 0 and _score < 0.1 else self.alarm_arc_idx_e
         if self.alarm_arc_cnt > 4:  # pre-alarm
             self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
                 [self.indicator_max_val / 2] * self.af_win_size
-            # self.alarm_arc_cnt = 0
-            self.alarm_arc_idx = peak_idx if self.alarm_arc_idx == -1 else self.alarm_arc_idx  # record pre-alarm idx
-        if self.alarm_arc_idx > 0 and peak_idx - self.alarm_arc_idx > self.af_win_size * 16:
-            if self.alarm_arc_cnt > 4:
-                self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx - self.af_win_size:self.alarm_arc_idx] = \
-                    [self.indicator_max_val] * self.af_win_size
-            self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
+            # self.alarm_arc_state = 1
+        if self.alarm_arc_idx_s > 0:
+            self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx_s - self.af_win_size:self.alarm_arc_idx_s] = \
                 [self.indicator_max_val / 4 * 3] * self.af_win_size
-            # self.alarm_arc_descend_exit = False
-            self.alarm_arc_idx = -1
-            self.alarm_arc_cnt = 0
+        # if self.alarm_arc_idx_e > 0:
+        #     self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx_e - self.af_win_size:self.alarm_arc_idx_e] = \
+        #         [self.indicator_max_val / 4 * 1] * self.af_win_size
         self.last_peak_idx = peak_idx
 
     def sample(self):
