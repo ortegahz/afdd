@@ -1,5 +1,7 @@
 import logging
 
+import numpy as np
+import torch
 import torch.nn as nn
 import torch.optim as optim
 import xgboost as xgb
@@ -7,7 +9,7 @@ from torch.utils.data import DataLoader
 
 from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN
 from cores.nets import NetAFD
-import torch
+from utils.macros import DEVICE
 
 
 class ClassifierBase:
@@ -34,10 +36,10 @@ class ClassifierXGB(ClassifierBase):
 class ClassifierCNN(ClassifierBase):
     def __init__(self):
         super().__init__()
-        self.model = NetAFD()
+        self.model = NetAFD().to(DEVICE)
         # self.criterion = nn.CrossEntropyLoss()
         self.criterion = nn.BCEWithLogitsLoss()
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-3)
         self.features_generator = FeaturesGeneratorCNN()
 
     def train(self, x, y, num_epochs=1):
@@ -52,11 +54,14 @@ class ClassifierCNN(ClassifierBase):
                 self.optimizer.step()
             logging.info(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}')
 
-    def infer(self, x):
+    def infer(self, x, batch_size=16):
         x = self.features_generator.transform(x)
         self.model.eval()
+        predictions = []
         with torch.no_grad():
-            outputs = self.model(x)
-            # _, predicted = torch.max(outputs.data, 1)
-            predicted = torch.sigmoid(outputs).flatten()
-        return predicted
+            for i in range(0, len(x), batch_size):
+                batch_x = x[i:i + batch_size]
+                outputs = self.model(batch_x)
+                batch_predictions = torch.sigmoid(outputs).flatten().cpu().numpy()
+                predictions.extend(batch_predictions)
+        return np.array(predictions)

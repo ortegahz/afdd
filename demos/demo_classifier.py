@@ -5,6 +5,7 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from imblearn.over_sampling import SMOTE, RandomOverSampler
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from xgboost import plot_importance
@@ -57,6 +58,10 @@ def run_cnn(args):
     # x, y = iris.data, iris.target
     x, y = svm_label2data(args.path_label)
     y[y < 0] = 0
+    # smote = SMOTE(sampling_strategy='auto')
+    # x_train, y_train = smote.fit_resample(x_train, y_train)
+    ros = RandomOverSampler(sampling_strategy='auto')
+    x, y = ros.fit_resample(x, y)
     x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
     classifier = ClassifierCNN()
     classifier.train(x_train, y_train)
