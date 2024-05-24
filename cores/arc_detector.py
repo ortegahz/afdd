@@ -58,6 +58,9 @@ class ArcDetector:
         self.alarm_arc_descend_exit = False
         self.alarm_arc_state = 0
         self.peak_miss_cnt = 0
+        self.peak_bulge_mask_cnt = 0
+        self.peak_bulge_anchor_idx = -1
+        self.peak_bulge_cnt = 0
 
     @staticmethod
     def _update_svm_label_file(seq_pick, path_out='/home/manu/tmp/smartsd', subset='neg'):
@@ -82,6 +85,9 @@ class ArcDetector:
             self._update_svm_label_file(seq_pick, path_out=path_save, subset='neg')
 
     def reset(self):
+        self.peak_bulge_cnt = 0
+        self.peak_bulge_anchor_idx = -1
+        self.peak_bulge_mask_cnt = 0
         self.peak_miss_cnt = 0
         self.alarm_arc_state = 0
         self.alarm_arc_idx_e = -1
@@ -259,10 +265,11 @@ class ArcDetector:
             return
         self.alarm_arc_idx_e = self.last_peak_idx if self.peak_miss_cnt > self.af_win_size * 4 else self.alarm_arc_idx_e
         if self.alarm_arc_idx_e > 0 and self.alarm_arc_idx_s > 0:
+            _delta_peak_th = 256 if self.peak_bulge_mask_cnt > 0 else 512
             _delta_peak = \
                 self.db.db['rt'].seq_power[self.alarm_arc_idx_s] - self.db.db['rt'].seq_power[self.alarm_arc_idx_e]
             logging.info(f'_delta_peak --> {_delta_peak}')
-            self.alarm_arc_cnt = self.alarm_arc_cnt - 16 if _delta_peak > 272 else self.alarm_arc_cnt
+            self.alarm_arc_cnt = self.alarm_arc_cnt - 16 if _delta_peak > _delta_peak_th else self.alarm_arc_cnt
             _alarm_arc_end_idx = self.last_peak_idx
             _idx_e = self.alarm_arc_idx_e + self.af_win_size * 4
             _idx_e = _idx_e if _idx_e < self.db.db['rt'].seq_len else self.db.db['rt'].seq_len
@@ -270,6 +277,7 @@ class ArcDetector:
                 np.array(
                     self.db.db['rt'].seq_hf[self.alarm_arc_idx_s - self.af_win_size:_idx_e]).astype(float)
             _hf_cnt = np.sum(_seq_pick_hf_alarm > 0)
+            logging.info(f'_delta_peak_th --> {_delta_peak_th}')
             logging.info(f'_hf_cnt --> {_hf_cnt}')
             logging.info(f'self.alarm_arc_cnt --> {self.alarm_arc_cnt}')
             logging.info(f'self.alarm_arc_idx_s --> {self.alarm_arc_idx_s}')
@@ -289,6 +297,8 @@ class ArcDetector:
         if peak_idx < 0:  # seq filter
             self.alarm_arc_cnt = self.alarm_arc_cnt - 0.001 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt
             self.alarm_arc_cnt = self.alarm_arc_cnt + 0.001 if self.alarm_arc_cnt < 0 else self.alarm_arc_cnt
+            self.peak_bulge_mask_cnt = \
+                self.peak_bulge_mask_cnt - 1 if self.peak_bulge_mask_cnt > 0 else self.peak_bulge_mask_cnt
             # self.alarm_arc_cnt = max(0, self.alarm_arc_cnt)
             self.peak_miss_cnt += 1
             return
@@ -302,6 +312,21 @@ class ArcDetector:
         self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
             [_score * self.indicator_max_val] * self.af_win_size
         _delta_peak = self.db.db['rt'].seq_power[peak_idx] - self.db.db['rt'].seq_power[self.last_peak_idx]
+        _bulge_th = 256
+        if _delta_peak > _bulge_th and self.peak_bulge_anchor_idx < 0:
+            self.peak_bulge_anchor_idx = self.last_peak_idx
+            self.peak_bulge_cnt += 1
+            logging.info(f'int self.peak_bulge_anchor_idx --> {self.peak_bulge_anchor_idx}')
+        if self.peak_bulge_anchor_idx > 0:
+            _delta_peak_bulge = \
+                self.db.db['rt'].seq_power[peak_idx] - self.db.db['rt'].seq_power[self.peak_bulge_anchor_idx]
+            self.peak_bulge_cnt = self.peak_bulge_cnt + 1 if _delta_peak_bulge > _bulge_th else self.peak_bulge_cnt
+            logging.info(f'self.peak_bulge_cnt --> {self.peak_bulge_cnt}')
+        self.peak_bulge_mask_cnt = SAMPLE_RATE if self.peak_bulge_cnt > 2 else self.peak_bulge_mask_cnt
+        if self.peak_bulge_anchor_idx > 0 and peak_idx - self.peak_bulge_anchor_idx > self.af_win_size * 3:
+            self.peak_bulge_anchor_idx = -1
+            self.peak_bulge_cnt = 0
+            logging.info(f'self.peak_bulge_anchor_idx --> {self.peak_bulge_anchor_idx}')
         _alarm_arc_th = 1024 / self.indicator_max_val
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _score > _alarm_arc_th else self.alarm_arc_cnt
         # self.alarm_arc_descend_peak_cnt = self.alarm_arc_descend_peak_cnt + 1 if _delta_peak < 0 else 0
@@ -315,7 +340,7 @@ class ArcDetector:
             # self.alarm_arc_state = 1
         if self.alarm_arc_idx_s > 0:
             self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx_s - self.af_win_size:self.alarm_arc_idx_s] = \
-                [self.indicator_max_val / 4 * 3] * self.af_win_size
+                [self.indicator_max_val / 4 * 1] * self.af_win_size
         # if self.alarm_arc_idx_e > 0:
         #     self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx_e - self.af_win_size:self.alarm_arc_idx_e] = \
         #         [self.indicator_max_val / 4 * 1] * self.af_win_size
