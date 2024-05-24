@@ -4,22 +4,23 @@ import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from xgboost import plot_importance
 
-from cores.classifier import ClassifierXGB
+from cores.classifier import ClassifierXGB, ClassifierCNN
 from utils.utils import set_logging, svm_label2data
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--path_label', default='/home/manu/tmp/afd_v2')
+    parser.add_argument('--path_label', default='/media/manu/data/afdd/models/v0 - for_data_v0/afd_v2')
     parser.add_argument('--path_save', default='/home/manu/tmp/model.pickle')
     return parser.parse_args()
 
 
-def run(args):
+def run_xgb(args):
     logging.info(args)
     X, y = svm_label2data(args.path_label)
     y[y < 0] = 0
@@ -49,10 +50,30 @@ def run(args):
     plt.show()
 
 
+def run_cnn(args):
+    logging.info(args)
+    torch.manual_seed(42)
+    # iris = load_iris()
+    # x, y = iris.data, iris.target
+    x, y = svm_label2data(args.path_label)
+    y[y < 0] = 0
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
+    classifier = ClassifierCNN()
+    classifier.train(x_train, y_train)
+    with open(args.path_save, 'wb') as f:
+        pickle.dump(classifier, f)
+    with open(args.path_save, 'rb') as f:
+        classifier = pickle.load(f)
+    preds = classifier.infer(x_test)
+    preds = [1 if prob > 0.5 else 0 for prob in preds]
+    accuracy = accuracy_score(y_test, preds)
+    logging.info(f'acc -> {accuracy}')
+
+
 def main():
     set_logging()
     args = parse_args()
-    run(args)
+    run_cnn(args)
 
 
 if __name__ == '__main__':

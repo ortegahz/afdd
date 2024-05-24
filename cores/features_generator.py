@@ -1,6 +1,9 @@
 import numpy as np
 import pywt
+import torch
 import xgboost as xgb
+from sklearn.preprocessing import StandardScaler
+from torch.utils.data import TensorDataset
 
 
 class FeaturesGeneratorBase:
@@ -67,3 +70,22 @@ class FeaturesGeneratorXGB(FeaturesGeneratorBase):
         self.feature_names = feature_names_lst
         features = xgb.DMatrix(features_final, label=y, feature_names=self.feature_names)
         return features
+
+
+class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
+    def __init__(self):
+        super().__init__()
+        self.transformer = StandardScaler()
+
+    def transform(self, x):
+        x = x[:, :256]
+        x_scaled = self.transformer.fit_transform(x)
+        x_tensor = torch.tensor(x_scaled, dtype=torch.float32)
+        return x_tensor
+
+    def dataset_generate(self, x, y=None):
+        x_tensor = self.transform(x)
+        # y_tensor = torch.tensor(y, dtype=torch.long)
+        y_tensor = torch.tensor(y, dtype=torch.float32).view(-1, 1)
+        dataset = TensorDataset(x_tensor, y_tensor)
+        return dataset
