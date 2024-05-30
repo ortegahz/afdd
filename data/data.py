@@ -152,6 +152,7 @@ class DataV1(DataBase):
         # seq_adc_np[seq_adc_np == '∞'] = 64.0
         # seq_adc_np[seq_adc_np == '-∞'] = -64.0
         plt.plot(time_stamps, seq_adc_np.astype(float), label='seq_adc')
+        plt.xticks(np.arange(0, seq_len, SAMPLE_RATE / 50))
         plt.xlim(0, seq_len)
         # plt.ylim(-8, 8)
         plt.legend()
@@ -187,8 +188,34 @@ class DataV3(DataV2):
 
     def load(self):
         _npy = np.load(self.path_in)
+        # _npy = _npy * 2048 / 40 + 2048
         self.db['default'].seq_adc = _npy.tolist()
         self.db['default'].seq_len = len(self.db['default'].seq_adc)
+
+
+class DataV4(DataV3):
+    def __init__(self, addr):
+        super().__init__(addr)
+
+    def load(self):
+        _key = 'default'
+        _npy = np.load(self.path_in)
+        _npy = _npy * 2048 / 40 + 2048
+        self.db[_key].seq_power = _npy.tolist()
+        self.db[_key].len = len(self.db['default'].seq_power)
+        self.db[_key].seq_hf = np.array([0] * self.db[_key].len)
+        self.db[_key].seq_state_arc = np.array([0] * self.db[_key].len)
+        self.db[_key].seq_state_normal = np.array([0] * self.db[_key].len)
+
+        _file_label = self.path_in.replace('.npy', '.txt')
+        if not os.path.exists(_file_label):
+            return
+        with open(_file_label, 'r') as f:
+            _lines = f.readlines()
+        for _line in _lines:
+            idx_s, idx_e = _line.strip().split(' ')
+            idx_s, idx_e = max(int(idx_s), 0), min(int(idx_e), self.db[_key].len)
+            self.db[_key].seq_state_arc[idx_s:idx_e] = STATE_INDICATE_VAL
 
 
 class DataRT(DataBase):
@@ -261,6 +288,7 @@ class DataRT(DataBase):
                          xytext=(0, 10),
                          ha='center',
                          arrowprops=dict(arrowstyle="->", color='black'))
+        plt.xticks(np.arange(0, seq_len, SAMPLE_RATE / 50))
         plt.xlim(0, seq_len)
         plt.ylim(0, 4096)
         plt.legend()

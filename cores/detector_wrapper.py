@@ -1,9 +1,5 @@
-import glob
-import logging
-import os
-
 from cores.arc_detector import ArcDetector
-from data.data import DataV0
+from data.data import *
 from utils.utils import make_dirs
 
 
@@ -24,15 +20,14 @@ class DetectorWrapperV0(DetectorWrapperBase):
     format: case/<key_*>.BIN + ... + *.xlsx
     """
 
-    def __init__(self, addr, dir_save=None, key_pick=None, svm_label_file='/home/manu/tmp/smartsd'):
+    def __init__(self, addr, dir_save=None, key_pick=None, dbo_type='DataV0'):
         super().__init__(addr, dir_save)
         # self.pause_time_s = 0.01
         # self.plot_show = False
         self.key_pick = key_pick
         self.arc_detector = ArcDetector()
-        self.db_offline = DataV0(addr)
-        self.db_offline.load()
-        self.svm_label_file = svm_label_file
+        self.dbo_type = dbo_type
+        self.svm_label_file = '/home/manu/tmp/smartsd'
         if os.path.exists(self.svm_label_file):
             os.remove(self.svm_label_file)
 
@@ -47,8 +42,8 @@ class DetectorWrapperV0(DetectorWrapperBase):
                                         cur_hf=cur_hf,
                                         cur_state_gt_arc=cur_state_gt_arc,
                                         cur_state_gt_normal=cur_state_gt_normal)
-            self.arc_detector.infer_v2()
-            # self.arc_detector.sample()
+            # self.arc_detector.infer_v2()
+            self.arc_detector.sample()
         self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
                                   save_name=f'{case_name}_{key}.png', show=self.plot_show)
         # self.arc_detector.db.plot_cwt(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
@@ -59,6 +54,9 @@ class DetectorWrapperV0(DetectorWrapperBase):
         self.arc_detector.reset()
 
     def run(self):
+        self.db_offline = eval(self.dbo_type)(self.addr)
+        # self.db_offline = DataV0(addr)
+        self.db_offline.load()
         case_name = os.path.basename(self.addr)
         for key in self.db_offline.db.keys():
             if self.key_pick is not None and key != self.key_pick:
@@ -71,8 +69,8 @@ class DetectorWrapperV1(DetectorWrapperV0):
     format: dir/<cases>/<key_*>.BIN + ... + *.xlsx
     """
 
-    def __init__(self, addr, dir_save, key_pick=None):
-        super().__init__(addr, dir_save, key_pick=key_pick)
+    def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV0'):
+        super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
         self.pause_time_s = 0.01
         self.plot_show = False
         self.arc_detector = ArcDetector()
@@ -91,13 +89,38 @@ class DetectorWrapperV1(DetectorWrapperV0):
                 _cnt += 1
 
 
+class DetectorWrapperV1NPY(DetectorWrapperV1):
+    """
+    format: dir/<npys> + <txts>
+    """
+
+    def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV0'):
+        super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
+        self.pause_time_s = 0.01
+        self.plot_show = False
+        self.arc_detector = ArcDetector()
+
+    def run(self):
+        _cnt = 0
+        cases_path = glob.glob(os.path.join(self.addr, '*.npy'))
+        for i, case_path in enumerate(cases_path):
+            logging.info(f'[{len(cases_path)}] {i}th case_path: {case_path}')
+            case_name, _ = os.path.basename(case_path).split('.')
+            logging.info(f'case_name: {case_name}')
+            self.db_offline = DataV4(case_path)
+            self.db_offline.load()
+            for key in self.db_offline.db.keys():
+                self._process_single(key, f'{_cnt}_' + case_name)
+                _cnt += 1
+
+
 class DetectorWrapperV2(DetectorWrapperV1):
     """
     format: <cases_type>/<cases>/<key_*>.BIN + ... + *.xlsx
     """
 
-    def __init__(self, addr, dir_save, key_pick=None):
-        super().__init__(addr, dir_save, key_pick=key_pick)
+    def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV0'):
+        super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
         self.pause_time_s = 0.01
         self.plot_show = False
         self.arc_detector = ArcDetector()
@@ -113,6 +136,34 @@ class DetectorWrapperV2(DetectorWrapperV1):
                 case_name = os.path.basename(case_dir)
                 # logging.info(f'case_name: {case_name}')
                 self.db_offline = DataV0(case_dir)
+                self.db_offline.load()
+                for key in self.db_offline.db.keys():
+                    self._process_single(key, f'{_cnt}_' + case_name)
+                    _cnt += 1
+
+
+class DetectorWrapperV2NPY(DetectorWrapperV2):
+    """
+    format: dir/<cases_dir>/<.npys> + <.txts>
+    """
+
+    def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV0'):
+        super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
+        self.pause_time_s = 0.01
+        self.plot_show = False
+        self.arc_detector = ArcDetector()
+
+    def run(self):
+        _cnt = 0
+        cases_types_dir = glob.glob(os.path.join(self.addr, '*'))
+        for i, cases_type_dir in enumerate(cases_types_dir):
+            logging.info(f'[{len(cases_types_dir)}] {i}th cases_type_dir: {cases_type_dir}')
+            cases_path = glob.glob(os.path.join(cases_type_dir, '*.npy'))
+            for i, case_path in enumerate(cases_path):
+                logging.info(f'[{len(cases_path)}] {i}th case_path: {case_path}')
+                case_name, _ = os.path.basename(case_path).split('.')
+                logging.info(f'case_name: {case_name}')
+                self.db_offline = DataV4(case_path)
                 self.db_offline.load()
                 for key in self.db_offline.db.keys():
                     self._process_single(key, f'{_cnt}_' + case_name)
