@@ -149,8 +149,8 @@ class DataV1(DataBase):
         time_stamps = np.array(range(seq_len))
         # seq_adc_filtered = [64.0 if '∞' in str(item) else item for item in seq_adc]
         seq_adc_np = np.array(seq_adc)
-        seq_adc_np[seq_adc_np == '∞'] = 64.0
-        seq_adc_np[seq_adc_np == '-∞'] = -64.0
+        # seq_adc_np[seq_adc_np == '∞'] = 64.0
+        # seq_adc_np[seq_adc_np == '-∞'] = -64.0
         plt.plot(time_stamps, seq_adc_np.astype(float), label='seq_adc')
         plt.xlim(0, seq_len)
         # plt.ylim(-8, 8)
@@ -181,6 +181,16 @@ class DataV2(DataV1):
         self.db['default'].seq_len = len(self.db['default'].seq_adc)
 
 
+class DataV3(DataV2):
+    def __init__(self, dir_in):
+        super().__init__(dir_in)
+
+    def load(self):
+        _npy = np.load(self.path_in)
+        self.db['default'].seq_adc = _npy.tolist()
+        self.db['default'].seq_len = len(self.db['default'].seq_adc)
+
+
 class DataRT(DataBase):
     @dataclass
     class Signals:
@@ -200,7 +210,7 @@ class DataRT(DataBase):
         info_af_scores: list = field(default_factory=list)
         seq_len: int = 0
 
-    def __init__(self, wavelet_max_level):
+    def __init__(self, wavelet_max_level=4):
         super().__init__()
         self.db['rt'] = self.Signals()
         self.wavelet_max_level = wavelet_max_level
@@ -365,3 +375,62 @@ class DataRT(DataBase):
     def reset(self):
         del self.db['rt']
         self.db['rt'] = self.Signals()
+
+
+class DataPP(DataBase):
+    @dataclass
+    class Signals:
+        seq_power: list = field(default_factory=list)
+        seq_filtered: list = field(default_factory=list)
+        seq_sub_sampled: list = field(default_factory=list)
+        seq_len: int = 0
+
+    def __init__(self):
+        super().__init__()
+        self.key = 'pp'
+        self.db[self.key] = self.Signals()
+
+    def update(self, cur_power):
+        self.db[self.key].seq_power.append(cur_power)
+        self.db[self.key].seq_filtered.append(0)
+        self.db[self.key].seq_len += 1
+
+    def sub_sample(self, step=8):
+        self.db[self.key].seq_sub_sampled = self.db[self.key].seq_filtered[::step]
+
+    def save_sub_sample(self, path):
+        np.save(path, np.array(self.db[self.key].seq_sub_sampled).astype(float))
+
+    def plot(self, pause_time_s=1024, dir_save=None, save_name=None, show=True):
+        plt.ion()
+        seq_power = self.db[self.key].seq_power
+        seq_filtered = self.db[self.key].seq_filtered
+        seq_sub_sampled = self.db[self.key].seq_sub_sampled
+        seq_len = self.db[self.key].seq_len
+        _sub_sample_rate = round(self.db[self.key].seq_len / len(seq_sub_sampled))
+        time_stamps = np.array(range(seq_len))
+        plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
+        plt.plot(time_stamps, np.array(seq_filtered).astype(float), label='seq_filtered')
+        time_stamps_sub = time_stamps[::_sub_sample_rate]
+        plt.plot(time_stamps_sub, np.array(seq_sub_sampled).astype(float), label='time_stamps_sub')
+        plt.xlim(0, seq_len)
+        # plt.ylim(0, 4096)
+        plt.legend()
+        plt.tight_layout()
+        plt.title(save_name)
+        mng = plt.get_current_fig_manager()
+        mng.resize(*mng.window.maxsize())
+        if show:
+            plt.show()
+            plt.pause(pause_time_s)
+        if dir_save is not None:
+            monitor = get_monitors()[0]
+            screen_width, screen_height = monitor.width, monitor.height
+            fig = plt.gcf()
+            fig.set_size_inches(screen_width / fig.dpi, screen_height / fig.dpi)
+            plt.savefig(os.path.join(dir_save, save_name), dpi=fig.dpi)
+        plt.close()
+
+    def reset(self):
+        del self.db[self.key]
+        self.db[self.key] = self.Signals()
