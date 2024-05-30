@@ -16,7 +16,7 @@ from utils.utils import set_logging, svm_label2data
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--path_label', default='/media/manu/data/afdd/models/v0 - for_data_v0/afd_v2')
+    parser.add_argument('--path_label', default='/home/manu/tmp/afd_v3')
     parser.add_argument('--path_save', default='/home/manu/tmp/model.pickle')
     return parser.parse_args()
 
@@ -78,7 +78,7 @@ def run_cnn(args):
 def main():
     set_logging()
     args = parse_args()
-    run_cnn(args)
+    run_xgb(args)
 
 
 if __name__ == '__main__':

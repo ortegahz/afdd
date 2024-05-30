@@ -203,7 +203,7 @@ class DataV4(DataV3):
         _npy = _npy * 2048 / 40 + 2048
         self.db[_key].seq_power = _npy.tolist()
         self.db[_key].len = len(self.db['default'].seq_power)
-        self.db[_key].seq_hf = np.array([0] * self.db[_key].len)
+        self.db[_key].seq_hf = np.array([1] * self.db[_key].len)
         self.db[_key].seq_state_arc = np.array([0] * self.db[_key].len)
         self.db[_key].seq_state_normal = np.array([0] * self.db[_key].len)
 
@@ -288,7 +288,7 @@ class DataRT(DataBase):
                          xytext=(0, 10),
                          ha='center',
                          arrowprops=dict(arrowstyle="->", color='black'))
-        plt.xticks(np.arange(0, seq_len, SAMPLE_RATE / 50))
+        # plt.xticks(np.arange(0, seq_len, SAMPLE_RATE / 50))
         plt.xlim(0, seq_len)
         plt.ylim(0, 4096)
         plt.legend()

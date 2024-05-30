@@ -265,7 +265,8 @@ class ArcDetector:
             return
         self.alarm_arc_idx_e = self.last_peak_idx if self.peak_miss_cnt > self.af_win_size * 4 else self.alarm_arc_idx_e
         if self.alarm_arc_idx_e > 0 and self.alarm_arc_idx_s > 0:
-            _delta_peak_th = 256 if self.peak_bulge_mask_cnt > 0 else 512
+            logging.info(f'self.peak_bulge_mask_cnt --> {self.peak_bulge_mask_cnt}')
+            _delta_peak_th = 256 if self.peak_bulge_mask_cnt > 0 else 2048
             _delta_peak = \
                 self.db.db['rt'].seq_power[self.alarm_arc_idx_s] - self.db.db['rt'].seq_power[self.alarm_arc_idx_e]
             logging.info(f'_delta_peak --> {_delta_peak}')
@@ -312,10 +313,11 @@ class ArcDetector:
         self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
             [_score * self.indicator_max_val] * self.af_win_size
         _delta_peak = self.db.db['rt'].seq_power[peak_idx] - self.db.db['rt'].seq_power[self.last_peak_idx]
-        _bulge_th = 256
-        if _delta_peak > _bulge_th and self.peak_bulge_anchor_idx < 0:
+        _bulge_th = 512
+        if _delta_peak > _bulge_th and self.peak_bulge_anchor_idx < 0 and self.last_peak_idx > 0:
             self.peak_bulge_anchor_idx = self.last_peak_idx
             self.peak_bulge_cnt += 1
+            logging.info(f'_delta_peak -- > {_delta_peak}')
             logging.info(f'int self.peak_bulge_anchor_idx --> {self.peak_bulge_anchor_idx}')
         if self.peak_bulge_anchor_idx > 0:
             _delta_peak_bulge = \
@@ -327,7 +329,7 @@ class ArcDetector:
             self.peak_bulge_anchor_idx = -1
             self.peak_bulge_cnt = 0
             logging.info(f'self.peak_bulge_anchor_idx --> {self.peak_bulge_anchor_idx}')
-        _alarm_arc_th = 1024 / self.indicator_max_val
+        _alarm_arc_th = 2048 / self.indicator_max_val
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _score > _alarm_arc_th else self.alarm_arc_cnt
         # self.alarm_arc_descend_peak_cnt = self.alarm_arc_descend_peak_cnt + 1 if _delta_peak < 0 else 0
         # self.alarm_arc_cnt = self.alarm_arc_cnt - 4 if self.alarm_arc_descend_peak_cnt > 4 else self.alarm_arc_cnt
