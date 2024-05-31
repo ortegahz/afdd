@@ -6,7 +6,7 @@ from utils.utils import set_logging
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v1s_s400/负载抑制性试验/线路阻抗抑制试验（AF01报警）.npy')
+    parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v1s_s400/故障电弧试验/串联碳化路径4kw-1-无电弧.npy')
     parser.add_argument('--db_type', default='DataV3')
     parser.add_argument('--dir_plot_save', default='/home/manu/tmp/afdd_demo_parser_save')
     return parser.parse_args()

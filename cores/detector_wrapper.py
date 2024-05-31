@@ -105,8 +105,8 @@ class DetectorWrapperV1NPY(DetectorWrapperV1):
         cases_path = glob.glob(os.path.join(self.addr, '*.npy'))
         for i, case_path in enumerate(cases_path):
             logging.info(f'[{len(cases_path)}] {i}th case_path: {case_path}')
-            case_name, _ = os.path.basename(case_path).split('.')
-            logging.info(f'case_name: {case_name}')
+            # case_name, _ = os.path.basename(case_path).split('.')
+            case_name, _ = os.path.splitext(os.path.basename(case_path))
             self.db_offline = DataV4(case_path)
             self.db_offline.load()
             for key in self.db_offline.db.keys():
@@ -161,7 +161,8 @@ class DetectorWrapperV2NPY(DetectorWrapperV2):
             cases_path = glob.glob(os.path.join(cases_type_dir, '*.npy'))
             for i, case_path in enumerate(cases_path):
                 logging.info(f'[{len(cases_path)}] {i}th case_path: {case_path}')
-                case_name, _ = os.path.basename(case_path).split('.')
+                # case_name, _ = os.path.basename(case_path).split('.')
+                case_name, _ = os.path.splitext(os.path.basename(case_path))
                 logging.info(f'case_name: {case_name}')
                 self.db_offline = DataV4(case_path)
                 self.db_offline.load()

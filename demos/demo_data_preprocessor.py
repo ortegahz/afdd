@@ -8,7 +8,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     # parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v1s/误报警试验/误报警试验-变频空调-制冷模式启动运行（AF01未报警）.csv')
     # parser.add_argument('--dtr_type', default='PreprocessorWrapperV0')
-    parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v1s/误报警试验')
+    parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v1s/故障电弧试验')
     parser.add_argument('--dtr_type', default='PreprocessorWrapperV1')
     parser.add_argument('--dir_plot_save', default='/home/manu/tmp/demo_data_pp_save')
     return parser.parse_args()

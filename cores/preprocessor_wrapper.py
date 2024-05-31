@@ -29,7 +29,7 @@ class PreprocessorWrapperV0(PreprocessorWrapperBase):
         self.preprocessor = Preprocessor()
 
     def _process_single(self, path_data, save_dir):
-        case_name, _ = os.path.basename(path_data).split('.')
+        case_name, _ = os.path.splitext(os.path.basename(path_data))
         self.db_offline = DataV1(path_data)
         self.db_offline.load()
         db_offline_single = self.db_offline.db['default']

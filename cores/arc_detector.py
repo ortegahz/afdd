@@ -77,8 +77,8 @@ class ArcDetector:
     def save_samples(self, path_save='/home/manu/tmp/smartsd'):
         # if len(self.samples_neg) > len(self.samples_pos):
         #     self.samples_neg = random.sample(self.samples_neg, len(self.samples_pos))
-        # logging.info(f'len self.samples_pos -> {len(self.samples_pos)}')
-        # logging.info(f'len self.samples_neg -> {len(self.samples_neg)}')
+        logging.info(f'len self.samples_pos -> {len(self.samples_pos)}')
+        logging.info(f'len self.samples_neg -> {len(self.samples_neg)}')
         for seq_pick in self.samples_pos:
             self._update_svm_label_file(seq_pick, path_out=path_save, subset='pos')
         for seq_pick in self.samples_neg:
@@ -270,7 +270,7 @@ class ArcDetector:
             _delta_peak = \
                 self.db.db['rt'].seq_power[self.alarm_arc_idx_s] - self.db.db['rt'].seq_power[self.alarm_arc_idx_e]
             logging.info(f'_delta_peak --> {_delta_peak}')
-            self.alarm_arc_cnt = self.alarm_arc_cnt - 16 if _delta_peak > _delta_peak_th else self.alarm_arc_cnt
+            # self.alarm_arc_cnt = self.alarm_arc_cnt - 16 if _delta_peak > _delta_peak_th else self.alarm_arc_cnt
             _alarm_arc_end_idx = self.last_peak_idx
             _idx_e = self.alarm_arc_idx_e + self.af_win_size * 4
             _idx_e = _idx_e if _idx_e < self.db.db['rt'].seq_len else self.db.db['rt'].seq_len
@@ -293,11 +293,11 @@ class ArcDetector:
         self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
             else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
         self.db.db['rt'].seq_power_mean[-1] = self.power_mean
-        peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size, peak_th=self.power_mean + 8)
+        peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size, peak_th=self.power_mean + 64)
         peak_idx = self.db.db['rt'].seq_len - self.peak_eval_win_size // 2 if peak_idx_norm > 0 else -1
         if peak_idx < 0:  # seq filter
-            self.alarm_arc_cnt = self.alarm_arc_cnt - 0.001 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt
-            self.alarm_arc_cnt = self.alarm_arc_cnt + 0.001 if self.alarm_arc_cnt < 0 else self.alarm_arc_cnt
+            self.alarm_arc_cnt = self.alarm_arc_cnt - 0.0001 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt
+            self.alarm_arc_cnt = self.alarm_arc_cnt + 0.0001 if self.alarm_arc_cnt < 0 else self.alarm_arc_cnt
             self.peak_bulge_mask_cnt = \
                 self.peak_bulge_mask_cnt - 1 if self.peak_bulge_mask_cnt > 0 else self.peak_bulge_mask_cnt
             # self.alarm_arc_cnt = max(0, self.alarm_arc_cnt)

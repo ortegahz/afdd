@@ -16,7 +16,7 @@ from utils.utils import set_logging, svm_label2data
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--path_label', default='/home/manu/tmp/afd_v3')
+    parser.add_argument('--path_label', default='/home/manu/tmp/afd_v4')
     parser.add_argument('--path_save', default='/home/manu/tmp/model.pickle')
     return parser.parse_args()
 
@@ -25,10 +25,10 @@ def run_xgb(args):
     logging.info(args)
     X, y = svm_label2data(args.path_label)
     y[y < 0] = 0
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=33)
     num_pos = np.sum(y_train == 1)
     num_neg = np.sum(y_train == 0)
-    scale_pos_weight = num_neg / num_pos * 0.1
+    scale_pos_weight = num_neg / num_pos * 0.3
     # scale_pos_weight = 16
     params = {
         'max_depth': 3,
