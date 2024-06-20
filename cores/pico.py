@@ -1,11 +1,14 @@
 import ctypes
 import logging
 import time
+from multiprocessing import Process, Queue, Event
 
 import matplotlib.pyplot as plt
 import numpy as np
 from picosdk.functions import assert_pico_ok
 from picosdk.ps5000a import ps5000a as ps
+
+from utils.utils import set_logging
 
 
 class PicoBase:
@@ -17,10 +20,10 @@ class PicoBase:
 
 
 class Pico5444DMSO(PicoBase):
-    def __init__(self):
+    def __init__(self, data_queue, overflow_queue, stop_event):
         super().__init__()
-        self.sampleInterval, self.sampleUnits = None, None
-        self.maxADC = 0
+        self.sampleInterval, self.sampleUnits = -1, -1
+        self.maxADC = ctypes.c_int16()
         self.chandle, self.status = ctypes.c_int16(), dict()
         resolution = ps.PS5000A_DEVICE_RESOLUTION["PS5000A_DR_12BIT"]
         self.status["openunit"] = ps.ps5000aOpenUnit(ctypes.byref(self.chandle), None, resolution)
@@ -37,7 +40,7 @@ class Pico5444DMSO(PicoBase):
             assert_pico_ok(self.status["changePowerSource"])
         enabled = 1
         analogue_offset = 0.0
-        self.channel_range = ps.PS5000A_RANGE['PS5000A_5V']
+        self.channel_range = ps.PS5000A_RANGE['PS5000A_10V']  # Assuming the sensor output range is -5V to 5V
         self.status["setChA"] = ps.ps5000aSetChannel(self.chandle,
                                                      ps.PS5000A_CHANNEL['PS5000A_CHANNEL_A'],
                                                      enabled,
@@ -62,6 +65,13 @@ class Pico5444DMSO(PicoBase):
         self.nextSample = 0
         self.autoStopOuter = False
         self.wasCalledBack = False
+        self.data_queue = data_queue
+        self.overflow_queue = overflow_queue
+        self.stop_event = stop_event
+
+        # Get the maximum ADC value
+        self.status["maximumValue"] = ps.ps5000aMaximumValue(self.chandle, ctypes.byref(self.maxADC))
+        assert_pico_ok(self.status["maximumValue"])
 
     def _streaming_callback(self, handle, noOfSamples, startIndex, overflow, triggerAt, triggered, autoStop, param):
         self.wasCalledBack = True
@@ -69,27 +79,22 @@ class Pico5444DMSO(PicoBase):
         sourceEnd = startIndex + noOfSamples
         self.bufferCompleteA[self.nextSample:destEnd] = self.bufferAMax[startIndex:sourceEnd]
         self.nextSample += noOfSamples
+        if overflow:
+            self.overflow_queue.put(True)
         if autoStop:
             self.autoStopOuter = True
-
-    @staticmethod
-    def _adc2mV(bufferADC, range, maxADC):
-        channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
-        vRange = channelInputRanges[range]
-        bufferV = [(x * vRange) / maxADC.value for x in bufferADC]
-        return bufferV
 
     def sample(self):
         self.sampleInterval = ctypes.c_int32(256)
         self.sampleUnits = ps.PS5000A_TIME_UNITS['PS5000A_US']
         maxPreTriggerSamples = 0
-        autoStopOn = 1
+        autoStopOn = 0  # Disable auto stop
         downsampleRatio = 1
         self.status["runStreaming"] = ps.ps5000aRunStreaming(self.chandle,
                                                              ctypes.byref(self.sampleInterval),
                                                              self.sampleUnits,
                                                              maxPreTriggerSamples,
-                                                             self.totalSamples,
+                                                             0,  # Continuous streaming
                                                              autoStopOn,
                                                              downsampleRatio,
                                                              ps.PS5000A_RATIO_MODE['PS5000A_RATIO_MODE_NONE'],
@@ -99,24 +104,18 @@ class Pico5444DMSO(PicoBase):
         actualSampleIntervalNs = actualSampleInterval * 1000
         logging.info("Capturing at sample interval %s ns" % actualSampleIntervalNs)
         cFuncPtr = ps.StreamingReadyType(self._streaming_callback)
-        while self.nextSample < self.totalSamples and not self.autoStopOuter:
+
+        self.data_queue.put(self.maxADC.value)
+        self.data_queue.put(self.channel_range)
+        self.data_queue.put(self.maxADC)
+
+        while not self.stop_event.is_set():
             self.wasCalledBack = False
             self.status["getStreamingLastestValues"] = ps.ps5000aGetStreamingLatestValues(self.chandle, cFuncPtr, None)
-            if not self.wasCalledBack:
-                time.sleep(0.01)
-        logging.info("Done grabbing values.")
-        self.maxADC = ctypes.c_int16()
-        self.status["maximumValue"] = ps.ps5000aMaximumValue(self.chandle, ctypes.byref(self.maxADC))
-        assert_pico_ok(self.status["maximumValue"])
-        self.adc2mVChAMax = self._adc2mV(self.bufferCompleteA, self.channel_range, self.maxADC)
-
-    def plot(self):
-        time = np.linspace(0, (self.totalSamples - 1) * self.sampleInterval.value * 1000, self.totalSamples)
-        # plt.plot(time, self.adc2mVChAMax[:])
-        plt.plot(time, self.bufferCompleteA[:])
-        plt.xlabel('Time (ns)')
-        plt.ylabel('Voltage (mV)')
-        plt.show()
+            if self.wasCalledBack:
+                self.data_queue.put(self.bufferCompleteA[:self.nextSample].copy())
+                self.nextSample = 0
+            time.sleep(0.01)
 
     def close(self):
         self.status["stop"] = ps.ps5000aStop(self.chandle)
@@ -125,9 +124,79 @@ class Pico5444DMSO(PicoBase):
         assert_pico_ok(self.status["close"])
 
 
+def adc2mV(bufferADC, range, maxADC):
+    channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
+    vRange = channelInputRanges[range]
+    bufferV = [(x * vRange) / 1000 / maxADC.value for x in bufferADC]
+    print(f'maxADC.value --> {maxADC.value}')
+    print(f'vRange --> {vRange}')
+    return bufferV
+
+
+def data_acquisition_process(data_queue, overflow_queue, stop_event):
+    pico = Pico5444DMSO(data_queue, overflow_queue, stop_event)
+    try:
+        pico.sample()
+    finally:
+        pico.close()
+
+
+def data_plotting_process(data_queue, overflow_queue, stop_event):
+    plt.ion()
+    fig, ax = plt.subplots()
+    line, = ax.plot([], [])
+
+    def on_key(event):
+        if event.key == 'q':
+            stop_event.set()
+
+    fig.canvas.mpl_connect('key_press_event', on_key)
+
+    mng = plt.get_current_fig_manager()
+    mng.resize(*mng.window.maxsize())
+    ax.set_xlim(0, 2 * 1e6)
+    ax.set_ylim(-5, 5)
+
+    sample_interval = 256  # 256 us
+    num_samples = int(2 * 1e6 / sample_interval)
+    data_buffer = np.zeros(num_samples)
+    max_adc_value = data_queue.get()
+    channel_range = data_queue.get()
+    maxADC = data_queue.get()
+
+    while not stop_event.is_set():
+        if not overflow_queue.empty():
+            overflow = overflow_queue.get()
+            if overflow:
+                logging.warning("Data overflow detected! Samples may be lost.")
+
+        if not data_queue.empty():
+            new_data = data_queue.get()
+            current_values = adc2mV(new_data, channel_range, maxADC)
+            data_buffer = np.roll(data_buffer, -len(new_data))
+            # current_values = new_data * 10 / max_adc_value
+            data_buffer[-len(new_data):] = current_values
+            time_array = np.linspace(0, (len(data_buffer) - 1) * sample_interval, len(data_buffer))
+            line.set_xdata(time_array)
+            line.set_ydata(data_buffer)
+            ax.relim()
+            ax.autoscale_view()
+            fig.canvas.draw()
+            fig.canvas.flush_events()
+        time.sleep(0.01)
+
+    plt.ioff()
+    plt.show()
+
+
 if __name__ == '__main__':
-    pico = Pico5444DMSO()
-    pico.sample()
-    pico.plot()
-    pico.close()
-    logging.info(pico)
+    set_logging()
+    data_queue = Queue()
+    overflow_queue = Queue()
+    stop_event = Event()
+    acquisition_process = Process(target=data_acquisition_process, args=(data_queue, overflow_queue, stop_event))
+    plotting_process = Process(target=data_plotting_process, args=(data_queue, overflow_queue, stop_event))
+    acquisition_process.start()
+    plotting_process.start()
+    acquisition_process.join()
+    plotting_process.join()
