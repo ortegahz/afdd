@@ -48,7 +48,7 @@ class Pico5444DMSO(PicoBase):
                                                      self.channel_range,
                                                      analogue_offset)
         assert_pico_ok(self.status["setChA"])
-        self.sizeOfOneBuffer, self.numBuffersToCapture = 512, 8
+        self.sizeOfOneBuffer, self.numBuffersToCapture = 512, 1
         self.totalSamples = self.sizeOfOneBuffer * self.numBuffersToCapture
         self.bufferCompleteA = np.zeros(shape=self.totalSamples, dtype=np.int16)
         self.bufferAMax = np.zeros(shape=self.sizeOfOneBuffer, dtype=np.int16)
@@ -75,17 +75,18 @@ class Pico5444DMSO(PicoBase):
 
     def _streaming_callback(self, handle, noOfSamples, startIndex, overflow, triggerAt, triggered, autoStop, param):
         self.wasCalledBack = True
-        destEnd = self.nextSample + noOfSamples
-        sourceEnd = startIndex + noOfSamples
-        self.bufferCompleteA[self.nextSample:destEnd] = self.bufferAMax[startIndex:sourceEnd]
-        self.nextSample += noOfSamples
-        if overflow:
-            self.overflow_queue.put(True)
-        if autoStop:
-            self.autoStopOuter = True
+        self.data_queue.put(self.bufferAMax.copy())
+        # destEnd = self.nextSample + noOfSamples
+        # sourceEnd = startIndex + noOfSamples
+        # self.bufferCompleteA[self.nextSample:destEnd] = self.bufferAMax[startIndex:sourceEnd]
+        # self.nextSample += noOfSamples
+        # if overflow:
+        #     self.overflow_queue.put(True)
+        # if autoStop:
+        #     self.autoStopOuter = True
 
     def sample(self):
-        self.sampleInterval = ctypes.c_int32(256)
+        self.sampleInterval = ctypes.c_int32(1)
         self.sampleUnits = ps.PS5000A_TIME_UNITS['PS5000A_US']
         maxPreTriggerSamples = 0
         autoStopOn = 0  # Disable auto stop
@@ -113,9 +114,9 @@ class Pico5444DMSO(PicoBase):
             self.wasCalledBack = False
             self.status["getStreamingLastestValues"] = ps.ps5000aGetStreamingLatestValues(self.chandle, cFuncPtr, None)
             if self.wasCalledBack:
-                self.data_queue.put(self.bufferCompleteA[:self.nextSample].copy())
+                # self.data_queue.put(self.bufferCompleteA[:self.nextSample].copy())
                 self.nextSample = 0
-            time.sleep(0.01)
+            # time.sleep(0.01)
 
     def close(self):
         self.status["stop"] = ps.ps5000aStop(self.chandle)
@@ -170,18 +171,19 @@ def data_plotting_process(data_queue, overflow_queue, stop_event):
 
         if not data_queue.empty():
             new_data = data_queue.get()
-            current_values = adc2V(new_data, channel_range, maxADC)
-            data_buffer = np.roll(data_buffer, -len(new_data))
-            # current_values = new_data * 10 / max_adc_value
-            data_buffer[-len(new_data):] = current_values
-            time_array = np.linspace(0, (len(data_buffer) - 1) * sample_interval, len(data_buffer))
-            line.set_xdata(time_array)
-            line.set_ydata(data_buffer)
-            ax.relim()
-            ax.autoscale_view()
-            fig.canvas.draw()
-            fig.canvas.flush_events()
-        time.sleep(0.01)
+            logging.info((data_queue.qsize(), len(new_data)))
+            # current_values = adc2V(new_data, channel_range, maxADC)
+            logging.info(new_data[:4])
+            # data_buffer = np.roll(data_buffer, -len(new_data))
+            # data_buffer[-len(new_data):] = current_values
+            # time_array = np.linspace(0, (len(data_buffer) - 1) * sample_interval, len(data_buffer))
+            # line.set_xdata(time_array)
+            # line.set_ydata(data_buffer)
+            # ax.relim()
+            # ax.autoscale_view()
+            # fig.canvas.draw()
+            # fig.canvas.flush_events()
+        # time.sleep(0.01)
 
     plt.ioff()
     plt.show()
