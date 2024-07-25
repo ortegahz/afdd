@@ -139,7 +139,7 @@ class DataV1(DataBase):
         self.db['default'].seq_adc = signal.tolist()
         self.db['default'].seq_len = len(self.db['default'].seq_adc)
         _seq_adc_set = set(self.db['default'].seq_adc)
-        logging.info(f'[{len(_seq_adc_set)}] {_seq_adc_set}')
+        # logging.info(f'[{len(_seq_adc_set)}] {_seq_adc_set}')
 
     def plot(self, pause_time_s=1024, dir_save=None, show=False, save_name=None):
         plt.ion()
@@ -288,7 +288,7 @@ class DataRT(DataBase):
                          xytext=(0, 10),
                          ha='center',
                          arrowprops=dict(arrowstyle="->", color='black'))
-        # plt.xticks(np.arange(0, seq_len, SAMPLE_RATE / 50))
+        plt.xticks(np.arange(0, seq_len, SAMPLE_RATE / 50))
         plt.xlim(0, seq_len)
         plt.ylim(0, 4096)
         plt.legend()

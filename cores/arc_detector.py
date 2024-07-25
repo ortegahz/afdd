@@ -329,7 +329,7 @@ class ArcDetector:
             self.peak_bulge_anchor_idx = -1
             self.peak_bulge_cnt = 0
             logging.info(f'self.peak_bulge_anchor_idx --> {self.peak_bulge_anchor_idx}')
-        _alarm_arc_th = 2048 / self.indicator_max_val
+        _alarm_arc_th = 2500 / self.indicator_max_val
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _score > _alarm_arc_th else self.alarm_arc_cnt
         # self.alarm_arc_descend_peak_cnt = self.alarm_arc_descend_peak_cnt + 1 if _delta_peak < 0 else 0
         # self.alarm_arc_cnt = self.alarm_arc_cnt - 4 if self.alarm_arc_descend_peak_cnt > 4 else self.alarm_arc_cnt

@@ -27,7 +27,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
         self.key_pick = key_pick
         self.arc_detector = ArcDetector()
         self.dbo_type = dbo_type
-        self.svm_label_file = '/home/manu/tmp/smartsd'
+        self.svm_label_file = '/home/manu/tmp/afd'
         if os.path.exists(self.svm_label_file):
             os.remove(self.svm_label_file)
 
@@ -169,3 +169,28 @@ class DetectorWrapperV2NPY(DetectorWrapperV2):
                 for key in self.db_offline.db.keys():
                     self._process_single(key, f'{_cnt}_' + case_name)
                     _cnt += 1
+
+
+class DetectorWrapperV3NPY(DetectorWrapperV2):
+    """
+    format: dir/<any> + <.npys> + <.txts>/...
+    """
+
+    def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV0'):
+        super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
+        self.pause_time_s = 0.01
+        self.plot_show = False
+        self.arc_detector = ArcDetector()
+
+    def run(self):
+        _cnt = 0
+        cases_path = glob.glob(os.path.join(self.addr, '**', '*.npy'), recursive=True)
+        for i, case_path in enumerate(cases_path):
+            logging.info(f'[{len(cases_path)}] {i}th case_path: {case_path}')
+            case_name, _ = os.path.splitext(os.path.basename(case_path))
+            logging.info(f'case_name: {case_name}')
+            self.db_offline = DataV4(case_path)
+            self.db_offline.load()
+            for key in self.db_offline.db.keys():
+                self._process_single(key, f'{_cnt}_' + case_name)
+                _cnt += 1
