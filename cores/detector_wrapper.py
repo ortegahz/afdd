@@ -33,8 +33,8 @@ class DetectorWrapperV0(DetectorWrapperBase):
 
     def _process_single(self, key, case_name):
         db_offline_single = self.db_offline.db[key]
-        for idx in range(0, db_offline_single.len, self.arc_detector.sub_sample_rate):
-        # for idx in range(0, db_offline_single.len):
+        # for idx in range(0, db_offline_single.len, self.arc_detector.sub_sample_rate):
+        for idx in range(0, db_offline_single.len):
             cur_power = db_offline_single.seq_power[idx]
             cur_hf = db_offline_single.seq_hf[idx]
             cur_state_gt_arc = db_offline_single.seq_state_arc[idx]

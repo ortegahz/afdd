@@ -2,7 +2,7 @@ import argparse
 import logging
 from multiprocessing import Process, Queue, Event
 
-from cores.pico import data_acquisition_process, data_plotting_process
+from cores.pico import data_acquisition_process, data_plotting_process, afdd_process
 from utils.utils import set_logging
 
 
@@ -17,11 +17,12 @@ def run(args):
     overflow_queue = Queue()
     stop_event = Event()
     acquisition_process = Process(target=data_acquisition_process, args=(data_queue, overflow_queue, stop_event))
-    plotting_process = Process(target=data_plotting_process, args=(data_queue, overflow_queue, stop_event))
+    # _process = Process(target=data_plotting_process, args=(data_queue, overflow_queue, stop_event))
+    _process = Process(target=afdd_process, args=(data_queue, overflow_queue, stop_event))
     acquisition_process.start()
-    plotting_process.start()
+    _process.start()
     acquisition_process.join()
-    plotting_process.join()
+    _process.join()
 
 
 def main():

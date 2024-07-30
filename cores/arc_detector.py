@@ -296,7 +296,7 @@ class ArcDetector:
             logging.info(f'self.alarm_arc_cnt --> {self.alarm_arc_cnt}')
             logging.info(f'self.alarm_arc_idx_s --> {self.alarm_arc_idx_s}')
             logging.info(f'self.last_peak_idx --> {self.last_peak_idx}')
-            if _hf_cnt > 0 and self.alarm_arc_cnt > 4:
+            if _hf_cnt > 0 and self.alarm_arc_cnt > 3:
                 logging.info(f'alarm idx --> {self.last_peak_idx}')
                 self.db.db['rt'].seq_state_pred_arc[self.last_peak_idx - self.af_win_size:self.last_peak_idx] = \
                     [self.indicator_max_val * 99 / 100] * self.af_win_size

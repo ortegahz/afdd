@@ -34,7 +34,7 @@ def parse_args():
     # parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v2/subsample/')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV2NPY')
     # parser.add_argument('--db_key', default=None)
-    parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v2/subsample_v0/tmp/')
+    parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v2/subsample_v1 - wo pre-filter/')
     parser.add_argument('--dtr_type', default='DetectorWrapperV3NPY')
     parser.add_argument('--db_key', default=None)
     parser.add_argument('--dbo_type', default='DataV4')

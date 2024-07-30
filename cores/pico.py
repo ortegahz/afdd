@@ -1,6 +1,5 @@
 import ctypes
 import logging
-import time
 from multiprocessing import Process, Queue, Event
 
 import matplotlib.pyplot as plt
@@ -8,6 +7,7 @@ import numpy as np
 from picosdk.functions import assert_pico_ok
 from picosdk.ps5000a import ps5000a as ps
 
+from cores.arc_detector import ArcDetector
 from utils.utils import set_logging
 
 
@@ -25,7 +25,7 @@ class Pico5444DMSO(PicoBase):
         self.sampleInterval, self.sampleUnits = -1, -1
         self.maxADC = ctypes.c_int16()
         self.chandle, self.status = ctypes.c_int16(), dict()
-        resolution = ps.PS5000A_DEVICE_RESOLUTION["PS5000A_DR_12BIT"]
+        resolution = ps.PS5000A_DEVICE_RESOLUTION["PS5000A_DR_14BIT"]
         self.status["openunit"] = ps.ps5000aOpenUnit(ctypes.byref(self.chandle), None, resolution)
         try:
             assert_pico_ok(self.status["openunit"])
@@ -190,14 +190,42 @@ def data_plotting_process(data_queue, overflow_queue, stop_event):
     plt.show()
 
 
+def afdd_process(data_queue, overflow_queue, stop_event):
+    arc_detector = ArcDetector()
+
+    max_adc_value = data_queue.get()
+    channel_range = data_queue.get()
+    maxADC = data_queue.get()
+
+    while not stop_event.is_set():
+        if not overflow_queue.empty():
+            overflow = overflow_queue.get()
+            if overflow:
+                logging.warning("Data overflow detected! Samples may be lost.")
+
+        if not data_queue.empty():
+            new_data = data_queue.get()
+            logging.info((data_queue.qsize(), len(new_data)))
+            current_values = adc2V(new_data, channel_range, maxADC)
+            for idx in range(0, 512, arc_detector.sub_sample_rate):  # 512 should be same as pre-set buffer len
+                cur_power = current_values[idx]
+                arc_detector.db.update(
+                    cur_power=cur_power,
+                    cur_hf=1.0,
+                    cur_state_gt_arc=0.0,
+                    cur_state_gt_normal=0.0)
+                arc_detector.infer_v2()
+
+
 if __name__ == '__main__':
     set_logging()
     data_queue = Queue()
     overflow_queue = Queue()
     stop_event = Event()
     acquisition_process = Process(target=data_acquisition_process, args=(data_queue, overflow_queue, stop_event))
-    plotting_process = Process(target=data_plotting_process, args=(data_queue, overflow_queue, stop_event))
+    # _process = Process(target=data_plotting_process, args=(data_queue, overflow_queue, stop_event))
+    _process = Process(target=afdd_process, args=(data_queue, overflow_queue, stop_event))
     acquisition_process.start()
-    plotting_process.start()
+    _process.start()
     acquisition_process.join()
-    plotting_process.join()
+    _process.join()
