@@ -39,10 +39,14 @@ class ArcDetector:
         self.peak_eval_win_size = 128
         self.af_win_size = int(SAMPLE_RATE / 50)
         self.last_peak_idx = -1
+        self.sample_rate_org = 1 * 1000 * 1000
         self.sample_rate = SAMPLE_RATE  # 256 * 50
-        self.filter_cutoff_freq = 256  # hz
+        self.sub_sample_rate = int(self.sample_rate_org / self.sample_rate)
+        self.sample_rate_new = 22325
+        self.filter_cutoff_freq = self.sample_rate_new * 0.4  # hz
         self.filter_order = 4
-        self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter()
+        # self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter()
+        self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter_lp()
         self.filter_zi = self.filter_zi_org
         self.sample_win_size = self.sample_rate  # 1s
         self.sample_cnt = 1024
@@ -61,6 +65,7 @@ class ArcDetector:
         self.peak_bulge_mask_cnt = 0
         self.peak_bulge_anchor_idx = -1
         self.peak_bulge_cnt = 0
+        self.sub_sample_cnt = 1
 
     @staticmethod
     def _update_svm_label_file(seq_pick, path_out='/home/manu/tmp/smartsd', subset='neg'):
@@ -85,6 +90,7 @@ class ArcDetector:
             self._update_svm_label_file(seq_pick, path_out=path_save, subset='neg')
 
     def reset(self):
+        self.sub_sample_cnt = 1
         self.peak_bulge_cnt = 0
         self.peak_bulge_anchor_idx = -1
         self.peak_bulge_mask_cnt = 0
@@ -111,6 +117,13 @@ class ArcDetector:
         # b, a = cheby1(self.filter_order, rp, normal_cutoff, btype='high', analog=False)
         rs = 64
         b, a = cheby2(self.filter_order, rs, normal_cutoff, btype='high', analog=False)
+        zi = lfilter_zi(b, a)
+        return b, a, zi
+
+    def _design_highpass_filter_lp(self):
+        nyq = 0.5 * self.sample_rate  # TODO
+        normal_cutoff = self.filter_cutoff_freq / nyq
+        b, a = butter(self.filter_order, normal_cutoff, btype='low', analog=False)
         zi = lfilter_zi(b, a)
         return b, a, zi
 
@@ -286,7 +299,7 @@ class ArcDetector:
             if _hf_cnt > 0 and self.alarm_arc_cnt > 4:
                 logging.info(f'alarm idx --> {self.last_peak_idx}')
                 self.db.db['rt'].seq_state_pred_arc[self.last_peak_idx - self.af_win_size:self.last_peak_idx] = \
-                    [self.indicator_max_val] * self.af_win_size
+                    [self.indicator_max_val * 99 / 100] * self.af_win_size
                 self.alarm_arc_state = 0
             self.alarm_arc_idx_s, self.alarm_arc_idx_e = -1, -1
         power_pick = self.db.db['rt'].seq_power[-1]
@@ -335,7 +348,7 @@ class ArcDetector:
         # self.alarm_arc_cnt = self.alarm_arc_cnt - 4 if self.alarm_arc_descend_peak_cnt > 4 else self.alarm_arc_cnt
         self.db.db['rt'].info_af_scores.append(self.alarm_arc_cnt)
         self.alarm_arc_idx_s = peak_idx if self.alarm_arc_idx_s < 0 and _score > _alarm_arc_th else self.alarm_arc_idx_s
-        self.alarm_arc_idx_e = peak_idx if self.alarm_arc_idx_s > 0 and _score < 0.1 else self.alarm_arc_idx_e
+        self.alarm_arc_idx_e = peak_idx if self.alarm_arc_idx_s > 0 and _score < _alarm_arc_th else self.alarm_arc_idx_e
         if self.alarm_arc_cnt > 4:  # pre-alarm
             self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
                 [self.indicator_max_val / 2] * self.af_win_size
@@ -347,6 +360,15 @@ class ArcDetector:
         #     self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx_e - self.af_win_size:self.alarm_arc_idx_e] = \
         #         [self.indicator_max_val / 4 * 1] * self.af_win_size
         self.last_peak_idx = peak_idx
+
+    def _preprocess(self):
+        # filtered_sample, self.filter_zi = self._realtime_highpass_filter(self.db.db['rt'].seq_power[-1])
+        # self.db.db['rt'].seq_filtered[-1] = filtered_sample
+        # if self.sub_sample_cnt == self.sub_sample_rate:
+        #     self.db.db['rt'].seq_power_ss.append(filtered_sample)
+        if self.sub_sample_cnt == self.sub_sample_rate:
+            self.db.db['rt'].seq_power_ss.append(self.db.db['rt'].seq_power[-1])
+        self.sub_sample_cnt = self.sub_sample_cnt + 1 if self.sub_sample_cnt < self.sub_sample_rate else 1
 
     def sample(self):
         if self.db.db['rt'].seq_len < self.af_win_size:  # waiting for enough data

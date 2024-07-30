@@ -25,7 +25,7 @@ def parse_args():
     # parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     # parser.add_argument('--db_key', default='default')
     # parser.add_argument('--addr',
-    #                     default='/media/manu/data/afdd/data/data_v2/subsample/20240709-国标竞品采集 - labeled/a部分/20240709-鼎信16A-负载抑制-电暖器-叠加电阻箱RLC各1KW-正常报警-退刀-0010.npy')
+    #                     default='/media/manu/data/afdd/data/data_v2/subsample/tmp/并联碳化路径3-1-报警-AF01_1m.npy')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     # parser.add_argument('--db_key', default='default')
     # parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v2/subsample/0627 - labled/误报警试验/')
@@ -34,7 +34,7 @@ def parse_args():
     # parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v2/subsample/')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV2NPY')
     # parser.add_argument('--db_key', default=None)
-    parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v2/subsample/')
+    parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v2/subsample_v0/tmp/')
     parser.add_argument('--dtr_type', default='DetectorWrapperV3NPY')
     parser.add_argument('--db_key', default=None)
     parser.add_argument('--dbo_type', default='DataV4')

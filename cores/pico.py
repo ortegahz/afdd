@@ -128,7 +128,8 @@ class Pico5444DMSO(PicoBase):
 def adc2V(bufferADC, range, maxADC):
     channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
     vRange = channelInputRanges[range]
-    bufferV = [(x * vRange) / 1000 / maxADC.value for x in bufferADC]
+    # bufferV = [(x * vRange) / 100 / maxADC.value for x in bufferADC]
+    bufferV = np.array(bufferADC) * vRange / 100 / maxADC.value
     return bufferV
 
 
@@ -172,8 +173,8 @@ def data_plotting_process(data_queue, overflow_queue, stop_event):
         if not data_queue.empty():
             new_data = data_queue.get()
             logging.info((data_queue.qsize(), len(new_data)))
-            # current_values = adc2V(new_data, channel_range, maxADC)
-            logging.info(new_data[:4])
+            current_values = adc2V(new_data, channel_range, maxADC)
+            # logging.info(current_values[:4])
             # data_buffer = np.roll(data_buffer, -len(new_data))
             # data_buffer[-len(new_data):] = current_values
             # time_array = np.linspace(0, (len(data_buffer) - 1) * sample_interval, len(data_buffer))

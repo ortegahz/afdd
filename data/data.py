@@ -222,6 +222,7 @@ class DataRT(DataBase):
     @dataclass
     class Signals:
         seq_power: list = field(default_factory=list)
+        seq_power_ss: list = field(default_factory=list)
         seq_hf: list = field(default_factory=list)
         seq_filtered: list = field(default_factory=list)
         seq_filter_envelope: list = field(default_factory=list)

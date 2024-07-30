@@ -7,7 +7,7 @@ from utils import set_logging
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--paths_in', default=['/home/manu/tmp/afd_p0', '/home/manu/tmp/afd_p1'])
+    parser.add_argument('--paths_in', default=['/home/manu/tmp/afd_p0', '/home/manu/tmp/afd_p1_wof'])
     parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm')
     return parser.parse_args()
 

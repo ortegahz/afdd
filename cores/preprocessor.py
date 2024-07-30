@@ -10,7 +10,7 @@ class Preprocessor:
     def __init__(self):
         self.db = DataPP()
         self.db_key = 'pp'
-        self.sample_rate = SAMPLE_RATE
+        self.sample_rate = SAMPLE_RATE  # TODO: should be self.sample_rate_org
         # self.sub_sample_rate = 400  # 8.93 * 1000 * 1000 / 400 --> 22325.0
         # self.sample_rate_new = SAMPLE_RATE / self.sub_sample_rate
         self.sample_rate_org = 9.615 * 1000 * 1000
@@ -24,6 +24,7 @@ class Preprocessor:
 
     def reset(self):
         self.sub_sample_rate = int(self.sample_rate_org / self.sample_rate_new)
+        # self.sub_sample_rate = 1
         logging.info(f'self.sample_rate_org --> {self.sample_rate_org}')
         logging.info(f'self.sub_sample_rate --> {self.sub_sample_rate}')
         logging.info(f'sample_rate_new_real --> {self.sample_rate_org / self.sub_sample_rate}')
@@ -45,6 +46,7 @@ class Preprocessor:
 
     def process(self):
         # logging.info(self.db.db[self.db_key].seq_power[-1])
-        filtered_sample, self.filter_zi = self._realtime_highpass_filter(self.db.db[self.db_key].seq_power[-1])
-        self.db.db[self.db_key].seq_filtered[-1] = filtered_sample
+        # filtered_sample, self.filter_zi = self._realtime_highpass_filter(self.db.db[self.db_key].seq_power[-1])
+        # self.db.db[self.db_key].seq_filtered[-1] = filtered_sample
+        self.db.db[self.db_key].seq_filtered[-1] = self.db.db[self.db_key].seq_power[-1]
 
