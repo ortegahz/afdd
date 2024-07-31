@@ -129,7 +129,7 @@ def adc2V(bufferADC, range, maxADC):
     channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
     vRange = channelInputRanges[range]
     # bufferV = [(x * vRange) / 100 / maxADC.value for x in bufferADC]
-    bufferV = np.array(bufferADC) * vRange / 100 / maxADC.value
+    bufferV = bufferADC * float(vRange) / 100. / float(maxADC.value)
     return bufferV
 
 
@@ -191,30 +191,37 @@ def data_plotting_process(data_queue, overflow_queue, stop_event):
 
 
 def afdd_process(data_queue, overflow_queue, stop_event):
+    # set_logging()
     arc_detector = ArcDetector()
 
     max_adc_value = data_queue.get()
     channel_range = data_queue.get()
     maxADC = data_queue.get()
 
-    while not stop_event.is_set():
-        if not overflow_queue.empty():
-            overflow = overflow_queue.get()
-            if overflow:
-                logging.warning("Data overflow detected! Samples may be lost.")
+    try:
+        while not stop_event.is_set():
+            if not overflow_queue.empty():
+                overflow = overflow_queue.get()
+                if overflow:
+                    logging.warning("Data overflow detected! Samples may be lost.")
 
-        if not data_queue.empty():
-            new_data = data_queue.get()
-            logging.info((data_queue.qsize(), len(new_data)))
-            current_values = adc2V(new_data, channel_range, maxADC)
-            for idx in range(0, 512, arc_detector.sub_sample_rate):  # 512 should be same as pre-set buffer len
-                cur_power = current_values[idx]
-                arc_detector.db.update(
-                    cur_power=cur_power,
-                    cur_hf=1.0,
-                    cur_state_gt_arc=0.0,
-                    cur_state_gt_normal=0.0)
-                arc_detector.infer_v2()
+            if not data_queue.empty():
+                new_data = data_queue.get()
+                logging.info((data_queue.qsize(), len(new_data)))
+                current_values = adc2V(new_data, channel_range, maxADC)
+                for idx in range(0, 512, arc_detector.sub_sample_rate):  # 512 should be same as pre-set buffer len
+                    cur_power = current_values[idx] * 2048 / 40 + 2048
+                    arc_detector.db.update(
+                        cur_power=cur_power,
+                        cur_hf=1.0,
+                        cur_state_gt_arc=0.0,
+                        cur_state_gt_normal=0.0)
+                    arc_detector.infer_v2()
+    finally:
+        logging.info("Saving data and exiting...")
+        np.save(r'C:\Users\admin\Desktop\manu\seq_power.npy',
+                (np.array(arc_detector.db.db['rt'].seq_power) - 2048) * 40 / 2048
+                )
 
 
 if __name__ == '__main__':

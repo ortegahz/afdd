@@ -2,7 +2,9 @@ import argparse
 import logging
 from multiprocessing import Process, Queue, Event
 
-from cores.pico import data_acquisition_process, data_plotting_process, afdd_process
+import keyboard
+
+from cores.pico import data_acquisition_process, afdd_process
 from utils.utils import set_logging
 
 
@@ -16,13 +18,21 @@ def run(args):
     data_queue = Queue()
     overflow_queue = Queue()
     stop_event = Event()
+
     acquisition_process = Process(target=data_acquisition_process, args=(data_queue, overflow_queue, stop_event))
-    # _process = Process(target=data_plotting_process, args=(data_queue, overflow_queue, stop_event))
-    _process = Process(target=afdd_process, args=(data_queue, overflow_queue, stop_event))
     acquisition_process.start()
-    _process.start()
+
+    processing_process = Process(target=afdd_process, args=(data_queue, overflow_queue, stop_event))
+    processing_process.start()
+
+    def save_data_and_exit():
+        logging.info("Key pressed. Setting stop event...")
+        stop_event.set()
+
+    keyboard.add_hotkey('q', save_data_and_exit)
+
     acquisition_process.join()
-    _process.join()
+    processing_process.join()
 
 
 def main():

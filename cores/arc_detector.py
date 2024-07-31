@@ -14,8 +14,11 @@ from utils.macros import *
 
 class ArcDetector:
     def __init__(self):
-        with open('/home/manu/tmp/model.pickle', 'rb') as f:
+        with open(r'C:\Users\admin\Desktop\manu\model.pickle', 'rb') as f:
             self.classifier = pickle.load(f)
+        # self.classifier = ClassifierCNN()
+        # self.classifier.model = \
+        #     torch.load(r'C:\Users\admin\Desktop\manu\model_cpu.pth', map_location=torch.device('cpu'))
         self.power_mean = -1
         self.pm_lr = 1e-4
         self.wavelet_type = 'sym2'
@@ -301,8 +304,10 @@ class ArcDetector:
                 self.db.db['rt'].seq_state_pred_arc[self.last_peak_idx - self.af_win_size:self.last_peak_idx] = \
                     [self.indicator_max_val * 99 / 100] * self.af_win_size
                 self.alarm_arc_state = 0
+                print('arc fault alarm !!!')
             self.alarm_arc_idx_s, self.alarm_arc_idx_e = -1, -1
         power_pick = self.db.db['rt'].seq_power[-1]
+        # logging.info(f'power_pick --> {power_pick}')
         self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
             else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
         self.db.db['rt'].seq_power_mean[-1] = self.power_mean
@@ -323,6 +328,7 @@ class ArcDetector:
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
         _data = _seq_pick[np.newaxis, :]
         _score = self.classifier.infer(_data)[0]
+        # logging.info(f'_score --> {_score}')
         self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
             [_score * self.indicator_max_val] * self.af_win_size
         _delta_peak = self.db.db['rt'].seq_power[peak_idx] - self.db.db['rt'].seq_power[self.last_peak_idx]
