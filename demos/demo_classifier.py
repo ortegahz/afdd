@@ -93,8 +93,6 @@ def main():
     # run_xgb(args)
     # run_cnn(args)
 
-    world_size = torch.cuda.device_count()
-    logging.info(f'Starting mp.spawn with world_size: {world_size}')
     local_rank = int(os.environ['LOCAL_RANK'])
     world_size = int(os.environ['WORLD_SIZE'])
     main_worker(local_rank, world_size, args)
