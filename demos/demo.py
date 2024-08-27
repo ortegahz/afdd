@@ -1,5 +1,7 @@
 import argparse
 
+import torch.distributed as dist
+
 from cores.detector_wrapper import *
 from utils.utils import set_logging
 
@@ -25,7 +27,7 @@ def parse_args():
     # parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     # parser.add_argument('--db_key', default='default')
     parser.add_argument('--addr',
-                        default=r'C:\Users\admin\Desktop\manu\seq_power.npy')
+                        default='/home/manu/tmp/seq_power.npy')
     parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     parser.add_argument('--db_key', default='default')
     # parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v2/subsample/0627 - labled/误报警试验/')
@@ -34,11 +36,11 @@ def parse_args():
     # parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v2/subsample/')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV2NPY')
     # parser.add_argument('--db_key', default=None)
-    # parser.add_argument('--addr', default=r'C:\Users\admin\Desktop\manu')
+    # parser.add_argument('--addr', default='/media/manu/ST2000DM005-2U91/afdd/data/data_v2/subsample_v1 - wo pre-filter/others/pos/')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV3NPY')
     # parser.add_argument('--db_key', default=None)
     parser.add_argument('--dbo_type', default='DataV4')
-    parser.add_argument('--dir_plot_save', default=r'C:\Users\admin\Desktop\results')
+    parser.add_argument('--dir_plot_save', default='/home/manu/tmp/demo_arc_detector_save')
     return parser.parse_args()
 
 

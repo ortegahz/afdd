@@ -7,7 +7,7 @@ class DetectorWrapperBase:
     def __init__(self, addr, dir_save=None):
         self.addr = addr
         self.dir_save = dir_save
-        self.pause_time_s = 1024
+        self.pause_time_s = 4096
         self.plot_show = True
         make_dirs(dir_save, reset=True)
 

@@ -1,24 +1,21 @@
 import logging
 import os
-import pickle
 import sys
 from subprocess import *
 
 import numpy as np
 import pywt
+import torch
 from scipy.signal import *
 
+from cores.classifier import ClassifierCNN
 from data.data import DataRT
 from utils.macros import *
 
 
 class ArcDetector:
     def __init__(self):
-        with open(r'C:\Users\admin\Desktop\manu\model.pickle', 'rb') as f:
-            self.classifier = pickle.load(f)
-        # self.classifier = ClassifierCNN()
-        # self.classifier.model = \
-        #     torch.load(r'C:\Users\admin\Desktop\manu\model_cpu.pth', map_location=torch.device('cpu'))
+        self._build_model()
         self.power_mean = -1
         self.pm_lr = 1e-4
         self.wavelet_type = 'sym2'
@@ -69,6 +66,19 @@ class ArcDetector:
         self.peak_bulge_anchor_idx = -1
         self.peak_bulge_cnt = 0
         self.sub_sample_cnt = 1
+
+    def _build_model(self, path_model='/home/manu/tmp/model.pt'):
+        # with open('/home/manu/tmp/model.pickle', 'rb') as f:
+        #     self.classifier = pickle.load(f)
+        self.classifier = ClassifierCNN()
+        _state_dict = torch.load(path_model, map_location=torch.device('cuda:0'))
+        _new_state_dict = {}
+        for k, v in _state_dict.items():
+            if k.startswith('module.'):
+                _new_state_dict[k[7:]] = v
+            else:
+                _new_state_dict[k] = v
+        self.classifier.model.load_state_dict(_new_state_dict)
 
     @staticmethod
     def _update_svm_label_file(seq_pick, path_out='/home/manu/tmp/smartsd', subset='neg'):

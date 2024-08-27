@@ -34,7 +34,9 @@ def svm_label2data(path_label):
     with open(path_label, 'r') as file:
         lines = file.readlines()
     x, y = list(), list()
-    for line in lines:
+    for i, line in enumerate(lines):
+        # if i > 4096 * 4:
+        #     break
         line_lst = line.strip().split(' ')
         # logging.info(line_lst)
         y.append(int(line_lst[0]))

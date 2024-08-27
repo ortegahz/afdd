@@ -1,13 +1,9 @@
-import logging
-
 import numpy as np
 import pywt
 import torch
 import xgboost as xgb
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import TensorDataset
-
-from utils.macros import DEVICE
 
 
 class FeaturesGeneratorBase:
@@ -81,16 +77,15 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
         super().__init__()
         self.transformer = StandardScaler()
 
-    def transform(self, x):
-        x = x[:, :256]
-        x_scaled = (x - 2048) / 4096
-        x_tensor = torch.tensor(x_scaled, dtype=torch.float32)
-        x_tensor = x_tensor.unsqueeze(1)
-        return x_tensor.to(DEVICE)
+    def transform(self, x, device='cuda:0'):
+        x = torch.tensor(x[:, :256], dtype=torch.float32, device=device)
+        x = (x - 2048) / 4096
+        x = x.unsqueeze(1)
+        return x
 
-    def dataset_generate(self, x, y=None):
-        x_tensor = self.transform(x)
+    def dataset_generate(self, x, y=None, device='cuda:0'):
+        x_tensor = self.transform(x, device=device)
         # y_tensor = torch.tensor(y, dtype=torch.long)
-        y_tensor = torch.tensor(y, dtype=torch.float32).view(-1, 1).to(DEVICE)
+        y_tensor = torch.tensor(y, dtype=torch.float32).view(-1, 1).to(device)
         dataset = TensorDataset(x_tensor, y_tensor)
         return dataset
