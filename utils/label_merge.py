@@ -9,7 +9,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--paths_in',
                         default=['/home/manu/tmp/afd_base',
-                                 '/home/manu/tmp/afd',])
+                                 '/home/manu/tmp/afd_data_v3',])
     parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm')
     return parser.parse_args()
 

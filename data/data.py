@@ -280,7 +280,7 @@ class DataRT(DataBase):
         plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred', color='red')
         plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
-        plt.plot(time_stamps, np.array(seq_power_mean).astype(float), label='power_mean')
+        # plt.plot(time_stamps, np.array(seq_power_mean).astype(float), label='power_mean')
         plt.plot(info_pred_peaks, np.array(seq_power).astype(float)[info_pred_peaks], 'x', label='peaks')
         for i, peak in enumerate(info_pred_peaks):
             plt.annotate(f'{info_af_scores[i]: .2f}',

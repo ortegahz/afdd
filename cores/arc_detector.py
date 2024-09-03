@@ -332,6 +332,10 @@ class ArcDetector:
             self.peak_miss_cnt += 1
             return
         self.peak_miss_cnt = 0
+        # _peak_val = self.db.db['rt'].seq_power[peak_idx]
+        # if _peak_val > self.indicator_max_val - 64:
+        #     print('overload alarm !!!')
+        #     self.db.db['rt'].seq_state_pred_arc[peak_idx] = self.indicator_max_val * 99 / 100
         _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
         _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
         _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
