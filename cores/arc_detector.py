@@ -321,6 +321,7 @@ class ArcDetector:
             # self.alarm_arc_cnt = max(0, self.alarm_arc_cnt)
             self.peak_miss_cnt += 1
             return
+        # print(f'peak_idx --> {peak_idx}')
         self.peak_miss_cnt = 0
         _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
         _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)

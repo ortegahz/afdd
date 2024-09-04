@@ -217,6 +217,9 @@ def afdd_process(data_queue, overflow_queue, stop_event):
                         cur_state_gt_arc=0.0,
                         cur_state_gt_normal=0.0)
                     arc_detector.infer_v2()
+                if arc_detector.db.db['rt'].seq_len > arc_detector.sample_rate * 60 * 16:
+                    print('<reset>')
+                    arc_detector.reset()
     finally:
         logging.info("Saving data and exiting...")
         np.save(r'C:\Users\admin\Desktop\manu\seq_power.npy',
