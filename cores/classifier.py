@@ -41,7 +41,7 @@ class ClassifierCNN(ClassifierBase):
     def __init__(self, rank=0, ddp=False):
         super().__init__()
         self.local_rank = 0  # can not see other gpus
-        self.num_epochs = 1024
+        self.num_epochs = 64
         self.lr = 1e-3
         self.model = NetAFD().to(self.local_rank)
         if ddp:

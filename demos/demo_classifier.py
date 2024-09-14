@@ -19,8 +19,8 @@ from utils.utils import set_logging, svm_label2data
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--path_label', default='/home/Huangzhe/test/afd_pm')
-    parser.add_argument('--path_save', default='/home/Huangzhe/test/model.pt')
+    parser.add_argument('--path_label', default='/home/Huangzhe/Test/manu-pc/tmp/afd_pm')
+    parser.add_argument('--path_save', default='/home/Huangzhe/Test/manu-pc/tmp/model.pt')
     parser.add_argument('--local_rank', type=int, default=0, help='Local rank for distributed training')
     return parser.parse_args()
 
@@ -57,13 +57,14 @@ def run_xgb(args):
 
 def run_cnn(args):
     logging.info(args)
-    torch.manual_seed(42)
+    _seed = 64
+    torch.manual_seed(_seed)
     x, y = svm_label2data(args.path_label)
     y[y < 0] = 0
     ros = RandomOverSampler(sampling_strategy='auto')
     x, y = ros.fit_resample(x, y)
     logging.info(f'ros -> {Counter(y)}')
-    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.5, random_state=_seed)
     classifier = ClassifierCNN(args.local_rank, ddp=True)
     classifier.train(x_train, y_train, x_test, y_test, args.path_save)
     if args.local_rank == 0:

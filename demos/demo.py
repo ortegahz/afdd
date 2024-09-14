@@ -27,7 +27,7 @@ def parse_args():
     # parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     # parser.add_argument('--db_key', default='default')
     # parser.add_argument('--addr',
-    #                     default='/media/manu/ST2000DM005-2U91/afdd/data/data_v3/demo测试数据/自主设计试验/正例/日光灯+吸尘器+无负载箱.npy')
+    #                     default='/media/manu/ST8000DM004-2U91/afdd/data/data_v3/demo测试数据/并联金属性接触电弧试验 - labeled/并联金属性接触电弧试验5-1.npy')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     # parser.add_argument('--db_key', default='default')
     # parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v2/subsample/0627 - labled/误报警试验/')
@@ -36,7 +36,7 @@ def parse_args():
     # parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v2/subsample/')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV2NPY')
     # parser.add_argument('--db_key', default=None)
-    parser.add_argument('--addr', default='/media/manu/ST2000DM005-2U91/afdd/data/data_v3/demo测试数据/')
+    parser.add_argument('--addr', default='/media/manu/ST8000DM004-2U91/afdd/data/data_v5/故障电弧测试数据-0911/')
     parser.add_argument('--dtr_type', default='DetectorWrapperV3NPY')
     parser.add_argument('--db_key', default=None)
     parser.add_argument('--dbo_type', default='DataV4')
