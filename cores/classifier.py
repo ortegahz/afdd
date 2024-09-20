@@ -1,5 +1,4 @@
 import logging
-import pickle
 
 import numpy as np
 import torch
@@ -9,11 +8,9 @@ from sklearn.metrics import accuracy_score
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 
-from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN
+from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset, SignalDataset
 from cores.loss import FocalLoss
 from cores.nets import NetAFD
-
-import os
 
 
 class ClassifierBase:
@@ -40,7 +37,7 @@ class ClassifierXGB(ClassifierBase):
 class ClassifierCNN(ClassifierBase):
     def __init__(self, rank=0, ddp=False):
         super().__init__()
-        self.local_rank = 0  # can not see other gpus
+        self.local_rank = 0
         self.num_epochs = 64
         self.lr = 1e-3
         self.model = NetAFD().to(self.local_rank)
@@ -52,7 +49,7 @@ class ClassifierCNN(ClassifierBase):
         self.rank = rank
 
     def train(self, x_train, y_train, x_val, y_val, path_save):
-        dataset = self.features_generator.dataset_generate(x_train, y_train, device=f'cuda:{self.local_rank}')
+        dataset = self.features_generator.dataset_generate(x_train, y_train)
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
         loader = DataLoader(dataset=dataset, batch_size=1024, shuffle=False, sampler=train_sampler)
         best_accuracy = 0.0
@@ -67,7 +64,7 @@ class ClassifierCNN(ClassifierBase):
                 loss.backward()
                 self.optimizer.step()
             val_accuracy = self.evaluate(x_val, y_val)
-            if self.rank == 0:  # Only log and save on rank 0
+            if self.rank == 0:
                 logging.info(
                     f'Epoch [{epoch + 1}/{self.num_epochs}],'
                     f' Loss: {loss.item():.8f},'
@@ -76,32 +73,37 @@ class ClassifierCNN(ClassifierBase):
                 if val_accuracy > best_accuracy:
                     best_accuracy = val_accuracy
                     torch.save(self.model.state_dict(), path_save)
-                    # with open(path_save, 'wb') as f:
-                    #     pickle.dump(self, f)
                     logging.info(f'Saved new best model with accuracy: {best_accuracy:.4f}')
 
     def infer(self, x, batch_size=16):
-        x = self.features_generator.transform(x, device=f'cuda:{self.local_rank}')
+        dataset = InferenceDataset(x, transform=self.features_generator.transform_sample,
+                                   seq_len=self.features_generator.seq_len)
+        loader = DataLoader(dataset, batch_size=batch_size)
         self.model.eval()
         predictions = []
         with torch.no_grad():
-            for i in range(0, len(x), batch_size):
-                batch_x = x[i:i + batch_size].to(self.local_rank)
+            for batch_x in loader:
+                batch_x = batch_x.to(self.local_rank)
                 outputs = self.model(batch_x)
                 batch_predictions = torch.sigmoid(outputs).flatten().cpu().numpy()
                 predictions.extend(batch_predictions)
         return np.array(predictions)
 
     def evaluate(self, x, y, batch_size=16):
-        x = self.features_generator.transform(x, device=f'cuda:{self.local_rank}')
+        dataset = SignalDataset(x, y, transform=self.features_generator.transform_sample,
+                                seq_len=self.features_generator.seq_len)
+        loader = DataLoader(dataset, batch_size=batch_size)
         self.model.eval()
-        predictions = []
+        all_predictions = []
+        all_labels = []
         with torch.no_grad():
-            for i in range(0, len(x), batch_size):
-                batch_x = x[i:i + batch_size].to(self.local_rank)
-                outputs = self.model(batch_x)
+            for inputs, labels in loader:
+                inputs = inputs.to(self.local_rank)
+                labels = labels.to(self.local_rank)
+                outputs = self.model(inputs)
                 batch_predictions = torch.sigmoid(outputs).flatten().cpu().numpy()
-                predictions.extend(batch_predictions)
-        predictions = [1 if prob > 0.5 else 0 for prob in predictions]
-        accuracy = accuracy_score(y, predictions)
+                all_predictions.extend(batch_predictions)
+                all_labels.extend(labels.cpu().numpy())
+        predictions = [1 if prob > 0.5 else 0 for prob in all_predictions]
+        accuracy = accuracy_score(all_labels, predictions)
         return accuracy

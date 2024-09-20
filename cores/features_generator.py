@@ -5,6 +5,8 @@ import xgboost as xgb
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import TensorDataset
 
+from utils.macros import SAMPLE_RATE
+
 
 class FeaturesGeneratorBase:
     def __init__(self):
@@ -76,16 +78,55 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
     def __init__(self):
         super().__init__()
         self.transformer = StandardScaler()
+        self.seq_len = int(SAMPLE_RATE / 50)
 
-    def transform(self, x, device='cuda:0'):
-        x = torch.tensor(x[:, :256], dtype=torch.float32, device=device)
-        x = (x - 2048) / 4096
-        x = x.unsqueeze(1)
-        return x
+    @staticmethod
+    def transform_sample(x_sample, seq_len):
+        x_tensor = torch.tensor(x_sample, dtype=torch.float32)
+        x_signal = x_tensor.clone()
+        x_signal[:seq_len] = (x_signal[:seq_len] - 2048) / 4096
+        fft_values = torch.fft.fft(x_signal[:seq_len])
+        fft_magnitude = torch.abs(fft_values)
+        x_signal[seq_len:] = fft_magnitude
+        x_signal = x_signal.unsqueeze(0)
+        return x_signal
 
-    def dataset_generate(self, x, y=None, device='cuda:0'):
-        x_tensor = self.transform(x, device=device)
-        # y_tensor = torch.tensor(y, dtype=torch.long)
-        y_tensor = torch.tensor(y, dtype=torch.float32).view(-1, 1).to(device)
-        dataset = TensorDataset(x_tensor, y_tensor)
+    def dataset_generate(self, x, y=None):
+        dataset = SignalDataset(x, y, transform=self.transform_sample, seq_len=self.seq_len)
         return dataset
+
+
+class SignalDataset(torch.utils.data.Dataset):
+    def __init__(self, x, y, transform, seq_len):
+        self.x = x
+        self.y = y
+        self.transform = transform
+        self.seq_len = seq_len
+
+    def __len__(self):
+        return len(self.x)
+
+    def __getitem__(self, idx):
+        x_sample = self.x[idx]
+        y_sample = self.y[idx] if self.y is not None else None
+        x_signal = self.transform(x_sample, self.seq_len)
+        if y_sample is not None:
+            y_tensor = torch.tensor(y_sample, dtype=torch.float32).view(-1)
+            return x_signal, y_tensor
+        else:
+            return x_signal
+
+
+class InferenceDataset(torch.utils.data.Dataset):
+    def __init__(self, x, transform, seq_len):
+        self.x = x
+        self.transform = transform
+        self.seq_len = seq_len
+
+    def __len__(self):
+        return len(self.x)
+
+    def __getitem__(self, idx):
+        x_sample = self.x[idx]
+        x_signal = self.transform(x_sample, self.seq_len)
+        return x_signal
