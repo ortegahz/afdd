@@ -36,7 +36,7 @@ def parse_args():
     #                     default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v5/故障电弧测试数据-0911/并联金属性接触电弧试验/5+0.3.npy')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     # parser.add_argument('--db_key', default='default')
-    parser.add_argument('--addr', default='/media/manu/ST8000DM004-2U91/afdd/data/data_v5/故障电弧测试数据-0911/')
+    parser.add_argument('--addr', default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v5/故障电弧测试数据-0911/')
     parser.add_argument('--dtr_type', default='DetectorWrapperV3NPY')
     parser.add_argument('--db_key', default=None)
     parser.add_argument('--dbo_type', default='DataV4')

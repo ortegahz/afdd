@@ -11,7 +11,8 @@ def parse_args():
                         default=['/media/manu/ST8000DM004-2U91/afdd/data/data_v1/s400/afd_data_v1_s400',
                                  '/media/manu/ST8000DM004-2U91/afdd/data/data_v2/subsample_v1 - wo pre-filter/afd_data_v2_wof',
                                  '/media/manu/ST8000DM004-2U91/afdd/data/data_v3/demo测试数据/afd_data_v3',
-                                 '/media/manu/ST8000DM004-2U91/afdd/data/data_v4/故障电弧测试数据-0904/afd_data_v4',])
+                                 '/media/manu/ST8000DM004-2U91/afdd/data/data_v4/故障电弧测试数据-0904/afd_data_v4',
+                                 '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v5/故障电弧测试数据-0911/afd_data_v5',])
     parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm')
     return parser.parse_args()
 
