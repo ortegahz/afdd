@@ -19,7 +19,7 @@ from utils.utils import set_logging, svm_label2data
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--path_label', default='/home/Huangzhe/test/manu-pc/tmp/afd_pm')
+    parser.add_argument('--path_label', default='/home/Huangzhe/test/afd_pm')
     parser.add_argument('--path_save', default='/home/Huangzhe/test/manu-pc/tmp/model.pt')
     parser.add_argument('--local_rank', type=int, default=0, help='Local rank for distributed training')
     return parser.parse_args()
@@ -68,7 +68,7 @@ def run_cnn(args):
     classifier = ClassifierCNN(args.local_rank, ddp=True)
     classifier.train(x_train, y_train, x_test, y_test, args.path_save)
     if args.local_rank == 0:
-        classifier.model.load_state_dict(torch.load(args.path_save, map_location=f'cuda:{args.local_rank}'))
+        # classifier.model.load_state_dict(torch.load(args.path_save, map_location=f'cuda:{args.local_rank}'))
         # with open(args.path_save, 'rb') as f:
         #     classifier = pickle.load(f)
         val_accuracy = classifier.evaluate(x_test, y_test)
@@ -76,7 +76,7 @@ def run_cnn(args):
 
 
 def main_worker(rank, world_size, args):
-    os.environ['CUDA_VISIBLE_DEVICES'] = '7'
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     torch.cuda.set_device(0)
     torch.cuda.empty_cache()
     dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)

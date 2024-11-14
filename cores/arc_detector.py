@@ -68,7 +68,7 @@ class ArcDetector:
         self.peak_bulge_cnt = 0
         self.sub_sample_cnt = 1
 
-    def _build_model(self, path_model='/home/manu/tmp/model.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models/31.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN()
@@ -292,9 +292,9 @@ class ArcDetector:
         if self.db.db['rt'].seq_len < self.af_win_size:  # waiting for enough data
             return
         self.alarm_arc_idx_e = self.last_peak_idx if self.peak_miss_cnt > self.af_win_size * 4 else self.alarm_arc_idx_e
-        if self.alarm_overload_cnt > 4:
-            print('overload alarm !!!')
-            self.db.db['rt'].seq_state_pred_arc[self.last_peak_idx] = self.indicator_max_val * 64 / 100
+        # if self.alarm_overload_cnt > 2:
+        #     print('overload alarm !!!')
+        #     self.db.db['rt'].seq_state_pred_arc[self.last_peak_idx] = self.indicator_max_val * 64 / 100
         if self.alarm_arc_idx_e > 0 and self.alarm_arc_idx_s > 0:
             logging.info(f'self.peak_bulge_mask_cnt --> {self.peak_bulge_mask_cnt}')
             _delta_peak_th = 256 if self.peak_bulge_mask_cnt > 0 else 2048
@@ -314,7 +314,7 @@ class ArcDetector:
             logging.info(f'self.alarm_arc_cnt --> {self.alarm_arc_cnt}')
             logging.info(f'self.alarm_arc_idx_s --> {self.alarm_arc_idx_s}')
             logging.info(f'self.last_peak_idx --> {self.last_peak_idx}')
-            if _hf_cnt > 0 and self.alarm_arc_cnt > 3:
+            if _hf_cnt > 0 and self.alarm_arc_cnt > 2:
                 logging.info(f'alarm idx --> {self.last_peak_idx}')
                 self.db.db['rt'].seq_state_pred_arc[self.last_peak_idx - self.af_win_size:self.last_peak_idx] = \
                     [self.indicator_max_val * 99 / 100] * self.af_win_size
@@ -329,7 +329,7 @@ class ArcDetector:
         peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size, peak_th=self.power_mean + 64)
         peak_idx = self.db.db['rt'].seq_len - self.peak_eval_win_size // 2 if peak_idx_norm > 0 else -1
         if peak_idx < 0:  # seq filter
-            self.alarm_overload_cnt = self.alarm_overload_cnt - 0.0001 if self.alarm_overload_cnt > 0 else self.alarm_overload_cnt
+            self.alarm_overload_cnt = self.alarm_overload_cnt - 0.0000001 if self.alarm_overload_cnt > 0 else self.alarm_overload_cnt
             self.alarm_arc_cnt = self.alarm_arc_cnt - 0.0001 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt
             self.alarm_arc_cnt = self.alarm_arc_cnt + 0.0001 if self.alarm_arc_cnt < 0 else self.alarm_arc_cnt
             self.peak_bulge_mask_cnt = \
@@ -340,11 +340,12 @@ class ArcDetector:
         self.peak_miss_cnt = 0
         _peak_val = self.db.db['rt'].seq_power[peak_idx]
         self.alarm_overload_cnt = \
-            self.alarm_overload_cnt + 1 if _peak_val > self.indicator_max_val - 64 else self.alarm_overload_cnt
+            self.alarm_overload_cnt + 1 if _peak_val > 5000 else self.alarm_overload_cnt
         _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
         _th_arc = (_peak_val - self.power_mean) * 0.01
         _cnt_arc = np.sum(np.abs(_seq_pick_power - self.power_mean) < _th_arc)
         _scale_arc = 128
+        _cnt_arc = _cnt_arc if _cnt_arc * _scale_arc < 4096 else 0
         self.db.db['rt'].seq_state_pred_balcony[peak_idx - self.af_win_size:peak_idx] = \
             [_cnt_arc * _scale_arc] * self.af_win_size
         _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
@@ -374,7 +375,9 @@ class ArcDetector:
             logging.info(f'self.peak_bulge_anchor_idx --> {self.peak_bulge_anchor_idx}')
         _th_raw = 2048
         _alarm_arc_th = _th_raw / self.indicator_max_val
-        _is_arc = _score > _alarm_arc_th or _cnt_arc * _scale_arc > _th_raw
+        # _is_arc = _score > _alarm_arc_th or _cnt_arc * _scale_arc > _th_raw
+        _model_w = 1.0
+        _is_arc = (_model_w * _score * self.indicator_max_val + (1 - _model_w) * _cnt_arc * _scale_arc) > _th_raw
         self.alarm_arc_cnt = \
             self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt
         # self.alarm_arc_descend_peak_cnt = self.alarm_arc_descend_peak_cnt + 1 if _delta_peak < 0 else 0

@@ -80,14 +80,42 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
         self.transformer = StandardScaler()
         self.seq_len = int(SAMPLE_RATE / 50)
 
+    # @staticmethod
+    # def transform_sample(x_sample, seq_len):
+    #     x_tensor = torch.tensor(x_sample, dtype=torch.float32)
+    #     x_signal = x_tensor.clone()
+    #     x_signal[:seq_len] = (x_signal[:seq_len] - 2048) / 4096
+    #     x_signal[seq_len:] = 0
+    #     x_signal = x_signal.unsqueeze(0)
+    #     return x_signal
+
+    # @staticmethod
+    # def transform_sample(x_sample, seq_len):
+    #     x_tensor = torch.tensor(x_sample, dtype=torch.float32)
+    #     x_signal = x_tensor.clone()
+    #     x_signal[:seq_len] = (x_signal[:seq_len] - 2048) / 4096
+    #     fft_values = torch.fft.fft(x_signal[:seq_len])
+    #     fft_magnitude = torch.abs(fft_values)
+    #     x_signal[seq_len:] = fft_magnitude
+    #     x_signal = x_signal.unsqueeze(0)
+    #     return x_signal
+
     @staticmethod
-    def transform_sample(x_sample, seq_len):
+    def transform_sample(x_sample, seq_len, wavelet='db4', level=3):
         x_tensor = torch.tensor(x_sample, dtype=torch.float32)
         x_signal = x_tensor.clone()
         x_signal[:seq_len] = (x_signal[:seq_len] - 2048) / 4096
-        fft_values = torch.fft.fft(x_signal[:seq_len])
-        fft_magnitude = torch.abs(fft_values)
-        x_signal[seq_len:] = fft_magnitude
+        x_time_np = x_signal[:seq_len].numpy()
+        _th_arc = (x_time_np[seq_len - 1] - np.mean(x_time_np)) * 0.01
+        _cnt_arc_norm = np.sum(np.abs(x_time_np - np.mean(x_time_np)) < _th_arc) / seq_len
+        x_signal[0:16] = _cnt_arc_norm  # anti-pool op
+        coeffs = pywt.wavedec(x_time_np, wavelet, level=level)
+        wavelet_coefficients = torch.from_numpy(np.concatenate(coeffs))
+        if wavelet_coefficients.numel() < len(x_signal[seq_len:]):
+            x_signal[seq_len:seq_len + len(wavelet_coefficients)] = wavelet_coefficients
+            x_signal[seq_len + len(wavelet_coefficients):] = 0
+        else:
+            x_signal[seq_len:] = wavelet_coefficients[:len(x_signal) - seq_len]
         x_signal = x_signal.unsqueeze(0)
         return x_signal
 

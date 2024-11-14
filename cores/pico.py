@@ -1,5 +1,6 @@
 import ctypes
 import logging
+import os
 from multiprocessing import Process, Queue, Event
 
 import matplotlib.pyplot as plt
@@ -40,7 +41,8 @@ class Pico5444DMSO(PicoBase):
             assert_pico_ok(self.status["changePowerSource"])
         enabled = 1
         analogue_offset = 0.0
-        self.channel_range = ps.PS5000A_RANGE['PS5000A_10V']  # Assuming the sensor output range is -5V to 5V
+        self.channel_range = ps.PS5000A_RANGE['PS5000A_5V']  # 30A * 0.1 V / A = 3V
+
         self.status["setChA"] = ps.ps5000aSetChannel(self.chandle,
                                                      ps.PS5000A_CHANNEL['PS5000A_CHANNEL_A'],
                                                      enabled,
@@ -48,8 +50,17 @@ class Pico5444DMSO(PicoBase):
                                                      self.channel_range,
                                                      analogue_offset)
         assert_pico_ok(self.status["setChA"])
+        self.status["setChB"] = ps.ps5000aSetChannel(self.chandle,
+                                                     ps.PS5000A_CHANNEL['PS5000A_CHANNEL_B'],
+                                                     enabled,
+                                                     ps.PS5000A_COUPLING['PS5000A_DC'],
+                                                     self.channel_range,
+                                                     analogue_offset)
+        assert_pico_ok(self.status["setChB"])
+
         self.sizeOfOneBuffer, self.numBuffersToCapture = 512, 1
         self.totalSamples = self.sizeOfOneBuffer * self.numBuffersToCapture
+
         self.bufferCompleteA = np.zeros(shape=self.totalSamples, dtype=np.int16)
         self.bufferAMax = np.zeros(shape=self.sizeOfOneBuffer, dtype=np.int16)
         memory_segment = 0
@@ -62,6 +73,18 @@ class Pico5444DMSO(PicoBase):
                                                                   memory_segment,
                                                                   ps.PS5000A_RATIO_MODE['PS5000A_RATIO_MODE_NONE'])
         assert_pico_ok(self.status["setDataBuffersA"])
+        self.bufferCompleteB = np.zeros(shape=self.totalSamples, dtype=np.int16)
+        self.bufferBMax = np.zeros(shape=self.sizeOfOneBuffer, dtype=np.int16)
+        self.status["setDataBuffersB"] = ps.ps5000aSetDataBuffers(self.chandle,
+                                                                  ps.PS5000A_CHANNEL['PS5000A_CHANNEL_B'],
+                                                                  self.bufferBMax.ctypes.data_as(
+                                                                      ctypes.POINTER(ctypes.c_int16)),
+                                                                  None,
+                                                                  self.sizeOfOneBuffer,
+                                                                  memory_segment,
+                                                                  ps.PS5000A_RATIO_MODE['PS5000A_RATIO_MODE_NONE'])
+        assert_pico_ok(self.status["setDataBuffersB"])
+
         self.nextSample = 0
         self.autoStopOuter = False
         self.wasCalledBack = False
@@ -75,7 +98,7 @@ class Pico5444DMSO(PicoBase):
 
     def _streaming_callback(self, handle, noOfSamples, startIndex, overflow, triggerAt, triggered, autoStop, param):
         self.wasCalledBack = True
-        self.data_queue.put(self.bufferAMax.copy())
+        self.data_queue.put(self.bufferAMax.copy(), self.bufferBMax.copy())
         # destEnd = self.nextSample + noOfSamples
         # sourceEnd = startIndex + noOfSamples
         # self.bufferCompleteA[self.nextSample:destEnd] = self.bufferAMax[startIndex:sourceEnd]
@@ -125,11 +148,11 @@ class Pico5444DMSO(PicoBase):
         assert_pico_ok(self.status["close"])
 
 
-def adc2V(bufferADC, range, maxADC):
+def adc2V(bufferADC, range, maxADC, scale=1.):
     channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
     vRange = channelInputRanges[range]
     # bufferV = [(x * vRange) / 100 / maxADC.value for x in bufferADC]
-    bufferV = bufferADC * float(vRange) / 100. / float(maxADC.value)
+    bufferV = bufferADC * float(vRange) / scale / float(maxADC.value)  # eg 1V --> 1000 --> 10A
     return bufferV
 
 
@@ -206,24 +229,29 @@ def afdd_process(data_queue, overflow_queue, stop_event):
                     logging.warning("Data overflow detected! Samples may be lost.")
 
             if not data_queue.empty():
-                new_data = data_queue.get()
-                logging.info((data_queue.qsize(), len(new_data)))
-                current_values = adc2V(new_data, channel_range, maxADC)
+                new_data_A, new_data_B = data_queue.get()
+                logging.info((data_queue.qsize(), len(new_data_A), len(new_data_B)))
+                current_values_A = adc2V(new_data_A, channel_range, maxADC, scale=100.)
+                current_values_B = adc2V(new_data_B, channel_range, maxADC, scale=10.)
                 for idx in range(0, 512, arc_detector.sub_sample_rate):  # 512 should be same as pre-set buffer len
-                    cur_power = current_values[idx] * 2048 / 40 + 2048
+                    cur_power = current_values_A[idx] * 2048 / 40 + 2048
                     arc_detector.db.update(
                         cur_power=cur_power,
                         cur_hf=1.0,
                         cur_state_gt_arc=0.0,
-                        cur_state_gt_normal=0.0)
+                        cur_state_gt_normal=current_values_B)
                     arc_detector.infer_v2()
                 if arc_detector.db.db['rt'].seq_len > arc_detector.sample_rate * 60 * 16:
                     print('<reset>')
                     arc_detector.reset()
     finally:
         logging.info("Saving data and exiting...")
-        np.save(r'C:\Users\admin\Desktop\manu\seq_power.npy',
+        _save_dir = r'C:\Users\admin\Desktop\manu'
+        np.save(os.path.join(_save_dir, 'paseq_power.npy'),
                 (np.array(arc_detector.db.db['rt'].seq_power) - 2048) * 40 / 2048
+                )
+        np.save(os.path.join(_save_dir, 'cur_state_gt_normal.npy'),
+                np.array(arc_detector.db.db['rt'].cur_state_gt_normal)
                 )
 
 
