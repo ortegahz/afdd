@@ -68,7 +68,7 @@ class ArcDetector:
         self.peak_bulge_cnt = 0
         self.sub_sample_cnt = 1
 
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models/160.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models/207.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(ckpt=path_model)
@@ -400,6 +400,7 @@ class ArcDetector:
         self.last_peak_idx = peak_idx
 
     def infer_v3(self):
+        _alarm_arc_cnt_th = 2
         if self.db.db['rt'].seq_len < self.af_win_size:  # waiting for enough data
             return
         # assign self.alarm_arc_idx_e when long time peak miss
@@ -431,9 +432,9 @@ class ArcDetector:
             logging.info(f'self.alarm_arc_cnt --> {self.alarm_arc_cnt}')
             logging.info(f'self.alarm_arc_idx_s --> {self.alarm_arc_idx_s}')
             logging.info(f'self.last_peak_idx --> {self.last_peak_idx}')
-            if _hf_cnt > 0 and self.alarm_arc_cnt > 2:
+            if _hf_cnt > 0 and self.alarm_arc_cnt > _alarm_arc_cnt_th:
                 logging.info(f'alarm idx --> {self.last_peak_idx}')
-                self.db.db['rt'].seq_state_pred_arc[self.last_peak_idx - self.af_win_size:self.last_peak_idx] = \
+                self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx_e - self.af_win_size:self.alarm_arc_idx_e] = \
                     [self.indicator_max_val * 99 / 100] * self.af_win_size
                 self.alarm_arc_state = 0
                 print('arc fault alarm !!!')
@@ -507,7 +508,7 @@ class ArcDetector:
         self.db.db['rt'].info_af_scores.append(self.alarm_arc_cnt)
         self.alarm_arc_idx_s = peak_idx if self.alarm_arc_idx_s < 0 and _is_arc else self.alarm_arc_idx_s
         self.alarm_arc_idx_e = peak_idx if self.alarm_arc_idx_s > 0 and not _is_arc else self.alarm_arc_idx_e
-        if self.alarm_arc_cnt > 4:  # pre-alarm
+        if self.alarm_arc_cnt > _alarm_arc_cnt_th:  # pre-alarm
             self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
                 [self.indicator_max_val / 2] * self.af_win_size
             # self.alarm_arc_state = 1
