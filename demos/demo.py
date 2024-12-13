@@ -33,10 +33,10 @@ def parse_args():
     # parser.add_argument('--dtr_type', default='DetectorWrapperV2NPY')
     # parser.add_argument('--db_key', default=None)
     parser.add_argument('--addr',
-                        default='/media/manu/ST8000DM004-2U91/afdd/data/data_v7/故障电弧测试数据-11.15/负载抑制性试验/电容滤波器抑制试验/电容滤波器抑制试验.npy')
+                        default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v7/tmp/故障电弧测试数据-11.15/并联金属性接触电弧试验/3+1（1，未产生电弧报警）.npy')
     parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     parser.add_argument('--db_key', default='default')
-    # parser.add_argument('--addr', default='/media/manu/ST8000DM004-2U91/afdd/data/data_v3/demo测试数据/自主设计试验 - labeled/反例/')
+    # parser.add_argument('--addr', default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v8/故障电弧测试数据-11.28/自主设计试验 - labeled/反例 - labeled/')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV3NPY')
     # parser.add_argument('--db_key', default=None)
     parser.add_argument('--dbo_type', default='DataV4')

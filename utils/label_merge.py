@@ -13,7 +13,10 @@ def parse_args():
                                  '/media/manu/ST8000DM004-2U91/afdd/data/data_v3/demo测试数据/afd_data_v3',
                                  '/media/manu/ST8000DM004-2U91/afdd/data/data_v4/故障电弧测试数据-0904/afd_data_v4',
                                  '/media/manu/ST8000DM004-2U91/afdd/data/data_v5/故障电弧测试数据-0911/afd_data_v5',
-                                 '/media/manu/ST8000DM004-2U91/afdd/data/data_v6/故障电弧测试数据-0926/afd_data_v6',])
+                                 '/media/manu/ST8000DM004-2U91/afdd/data/data_v6/故障电弧测试数据-0926/afd_data_v6',
+                                 '/media/manu/ST8000DM004-2U91/afdd/data/data_v7/故障电弧测试数据-11.15/串并联碳化路径试验 - labeled/afd_data_v7',
+                                 '/media/manu/ST8000DM004-2U91/afdd/data/data_v8/故障电弧测试数据-11.28/afd_data_v8',
+                                 ])
     parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm')
     return parser.parse_args()
 

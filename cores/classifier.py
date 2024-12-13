@@ -35,20 +35,57 @@ class ClassifierXGB(ClassifierBase):
 
 
 class ClassifierCNN(ClassifierBase):
-    def __init__(self, rank=0, ddp=False):
+    def __init__(self, rank=0, ddp=False, ckpt=None):
         super().__init__()
         self.local_rank = 0
-        self.num_epochs = 64
+        self.num_epochs = 256
         self.lr = 1e-3
         self.model = NetAFD().to(self.local_rank)
+        self.optimizer = optim.Adam(self.model.parameters(), self.lr)
+        if ckpt is not None:
+            # self._load_checkpoint_v0(ckpt)
+            self._load_checkpoint_v1(ckpt)
         if ddp:
             self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
         self.criterion = FocalLoss().to(self.local_rank)
-        self.optimizer = optim.Adam(self.model.parameters(), self.lr)
         self.features_generator = FeaturesGeneratorCNN()
         self.rank = rank
 
-    def train(self, x_train, y_train, x_val, y_val, path_save):
+    def _load_checkpoint_v0(self, checkpoint_path):
+        state_dict = torch.load(checkpoint_path, map_location=f'cuda:{self.local_rank}')
+        if 'module.' in list(state_dict.keys())[0]:
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                name = k[7:]
+                new_state_dict[name] = v
+            state_dict = new_state_dict
+        self.model.load_state_dict(state_dict)
+
+    def _load_checkpoint_v1(self, checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location=f'cuda:{self.local_rank}')
+        state_dict = checkpoint['model_state_dict']
+        if 'module.' in list(state_dict.keys())[0]:
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                name = k[7:]
+                new_state_dict[name] = v
+            state_dict = new_state_dict
+        self.model.load_state_dict(state_dict)
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        # start_epoch = checkpoint.get('epoch', 0)
+        # best_accuracy = checkpoint.get('best_accuracy', 0.0)
+        # logging.info(f'Checkpoint loaded: starting at epoch {start_epoch}, best_accuracy {best_accuracy:.4f}')
+        # return start_epoch, best_accuracy
+
+    def _save_checkpoint(self, path, epoch, best_accuracy):
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'best_accuracy': best_accuracy,
+        }, path)
+
+    def train(self, x_train, y_train, x_val, y_val):
         dataset = self.features_generator.dataset_generate(x_train, y_train)
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
         loader = DataLoader(dataset=dataset, batch_size=1024, shuffle=False, sampler=train_sampler)
@@ -70,10 +107,14 @@ class ClassifierCNN(ClassifierBase):
                     f' Loss: {loss.item():.8f},'
                     f' Validation Accuracy: {val_accuracy:.4f},')
 
-                if val_accuracy > best_accuracy:
-                    best_accuracy = val_accuracy
-                    torch.save(self.model.state_dict(), f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/{epoch}.pt')
-                    logging.info(f'Saved new best model with accuracy: {best_accuracy:.4f}')
+                # if val_accuracy > best_accuracy or epoch == self.num_epochs - 1:
+                #     best_accuracy = val_accuracy
+                #     torch.save(self.model.state_dict(), f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/{epoch}.pt')
+                #     logging.info(f'Saved new best model with accuracy: {best_accuracy:.4f}')
+
+                # torch.save(self.model.state_dict(), f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/{epoch}.pt')
+
+                self._save_checkpoint(f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/{epoch}.pt', epoch, best_accuracy)
 
     def infer(self, x, batch_size=16):
         dataset = InferenceDataset(x, transform=self.features_generator.transform_sample,
