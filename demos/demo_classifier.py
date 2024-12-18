@@ -20,7 +20,7 @@ from utils.utils import set_logging, svm_label2data
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--path_label', default='/home/Huangzhe/test/afd_pm')
-    parser.add_argument('--path_ckpt', default='/home/Huangzhe/test/manu-pc/tmp/afdd_models_v1/93.pt')
+    parser.add_argument('--path_ckpt', default=None)
     parser.add_argument('--local_rank', type=int, default=0, help='Local rank for distributed training')
     return parser.parse_args()
 
@@ -64,7 +64,7 @@ def run_cnn(args):
     ros = RandomOverSampler(sampling_strategy='auto')
     x, y = ros.fit_resample(x, y)
     logging.info(f'ros -> {Counter(y)}')
-    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.001, random_state=_seed)
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.3, random_state=_seed)
     classifier = ClassifierCNN(args.local_rank, ddp=True, ckpt=args.path_ckpt)
     classifier.train(x_train, y_train, x_test, y_test)
     if args.local_rank == 0:

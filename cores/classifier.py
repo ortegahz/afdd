@@ -43,8 +43,8 @@ class ClassifierCNN(ClassifierBase):
         self.model = NetAFD().to(self.local_rank)
         self.optimizer = optim.Adam(self.model.parameters(), self.lr)
         if ckpt is not None:
-            # self._load_checkpoint_v0(ckpt)
-            self._load_checkpoint_v1(ckpt)
+            self._load_checkpoint_v0(ckpt)
+            # self._load_checkpoint_v1(ckpt)
         if ddp:
             self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
         self.criterion = FocalLoss().to(self.local_rank)
@@ -107,14 +107,14 @@ class ClassifierCNN(ClassifierBase):
                     f' Loss: {loss.item():.8f},'
                     f' Validation Accuracy: {val_accuracy:.4f},')
 
-                # if val_accuracy > best_accuracy or epoch == self.num_epochs - 1:
-                #     best_accuracy = val_accuracy
-                #     torch.save(self.model.state_dict(), f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/{epoch}.pt')
-                #     logging.info(f'Saved new best model with accuracy: {best_accuracy:.4f}')
+                if val_accuracy > best_accuracy:
+                    best_accuracy = val_accuracy
+                    torch.save(self.model.state_dict(), f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/best.pt')
+                    logging.info(f'Saved new best model with accuracy: {best_accuracy:.4f}')
 
                 # torch.save(self.model.state_dict(), f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/{epoch}.pt')
 
-                self._save_checkpoint(f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/{epoch}.pt', epoch, best_accuracy)
+                # self._save_checkpoint(f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/{epoch}.pt', epoch, best_accuracy)
 
     def infer(self, x, batch_size=16):
         dataset = InferenceDataset(x, transform=self.features_generator.transform_sample,

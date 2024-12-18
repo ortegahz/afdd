@@ -33,10 +33,10 @@ def parse_args():
     # parser.add_argument('--dtr_type', default='DetectorWrapperV2NPY')
     # parser.add_argument('--db_key', default=None)
     parser.add_argument('--addr',
-                        default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v8/故障电弧测试数据-11.28/自主设计试验 - labeled/正例 - labeled/日光灯+吸尘器+无负载箱.npy')
+                        default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v8/tmp/故障电弧测试数据-11.28/自主设计试验/反例/电钻+电暖多次调速调档.npy')
     parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     parser.add_argument('--db_key', default='default')
-    # parser.add_argument('--addr', default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v8/故障电弧测试数据-11.28/自主设计试验 - labeled/反例 - labeled/')
+    # parser.add_argument('--addr', default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v8/tmp/故障电弧测试数据-11.28/误报警试验/反例/')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV3NPY')
     # parser.add_argument('--db_key', default=None)
     parser.add_argument('--dbo_type', default='DataV4')

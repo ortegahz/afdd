@@ -35,8 +35,8 @@ class DetectorWrapperV0(DetectorWrapperBase):
         db_offline_single = self.db_offline.db[key]
         # for idx in range(0, db_offline_single.len, self.arc_detector.sub_sample_rate):
         for idx in range(0, db_offline_single.len):
-            if idx < 1315000 or idx > 9050000:
-                continue
+            # if idx < 6 * 1e6 or idx > 40 * 1e6:
+            #     continue
             cur_power = db_offline_single.seq_power[idx]
             cur_hf = db_offline_single.seq_hf[idx]
             cur_state_gt_arc = db_offline_single.seq_state_arc[idx]
