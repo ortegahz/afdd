@@ -237,6 +237,7 @@ class DataRT(DataBase):
         seq_wt_power_bg: list = field(default_factory=list)
         seq_wt_power_pioneer: list = field(default_factory=list)
         info_pred_peaks: list = field(default_factory=list)
+        info_eval_peaks: list = field(default_factory=list)
         info_af_scores: list = field(default_factory=list)
         seq_len: int = 0
 
@@ -278,6 +279,7 @@ class DataRT(DataBase):
         seq_state_arc = self.db[key].seq_state_gt_arc
         seq_state_normal = self.db[key].seq_state_gt_normal
         info_pred_peaks = self.db[key].info_pred_peaks
+        info_eval_peaks = self.db[key].info_eval_peaks
         info_af_scores = self.db[key].info_af_scores
         time_stamps = np.array(range(seq_len))
         plt.subplot(self.wavelet_max_level + 1, 1, 1)
@@ -288,8 +290,9 @@ class DataRT(DataBase):
         plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
         # plt.plot(time_stamps, np.array(seq_power_mean).astype(float), label='power_mean')
-        plt.plot(time_stamps, np.array(seq_peak_mean).astype(float), label='seq_peak_mean')
+        # plt.plot(time_stamps, np.array(seq_peak_mean).astype(float), label='seq_peak_mean')
         plt.plot(info_pred_peaks, np.array(seq_power).astype(float)[info_pred_peaks], 'x', label='peaks')
+        plt.plot(info_eval_peaks, np.array(seq_power).astype(float)[info_eval_peaks], 'o', label='peaks_e')
         for i, peak in enumerate(info_pred_peaks):
             plt.annotate(f'{info_af_scores[i]: .2f}',
                          (peak, seq_power[peak]),
