@@ -292,7 +292,7 @@ class DataRT(DataBase):
         # plt.plot(time_stamps, np.array(seq_power_mean).astype(float), label='power_mean')
         # plt.plot(time_stamps, np.array(seq_peak_mean).astype(float), label='seq_peak_mean')
         plt.plot(info_pred_peaks, np.array(seq_power).astype(float)[info_pred_peaks], 'x', label='peaks')
-        plt.plot(info_eval_peaks, np.array(seq_power).astype(float)[info_eval_peaks], 'o', label='peaks_e')
+        # plt.plot(info_eval_peaks, np.array(seq_power).astype(float)[info_eval_peaks], 'o', label='peaks_e')
         for i, peak in enumerate(info_pred_peaks):
             plt.annotate(f'{info_af_scores[i]: .2f}',
                          (peak, seq_power[peak]),

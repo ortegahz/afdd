@@ -109,7 +109,7 @@ class ClassifierCNN(ClassifierBase):
 
                 if val_accuracy > best_accuracy:
                     best_accuracy = val_accuracy
-                    torch.save(self.model.state_dict(), f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/best.pt')
+                    torch.save(self.model.state_dict(), f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/best_e{epoch}.pt')
                     logging.info(f'Saved new best model with accuracy: {best_accuracy:.4f}')
 
                 # torch.save(self.model.state_dict(), f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/{epoch}.pt')
