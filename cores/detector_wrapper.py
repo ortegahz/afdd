@@ -35,8 +35,8 @@ class DetectorWrapperV0(DetectorWrapperBase):
         db_offline_single = self.db_offline.db[key]
         # for idx in range(0, db_offline_single.len, self.arc_detector.sub_sample_rate):
         for idx in range(0, db_offline_single.len):
-            if idx < 0.3 * 1e6 or idx > 0.75 * 1e6:
-                continue
+            # if idx < 0.25 * 1e6 or idx > 1.8 * 1e6:
+            #     continue
             cur_power = db_offline_single.seq_power[idx]
             cur_hf = db_offline_single.seq_hf[idx]
             cur_state_gt_arc = db_offline_single.seq_state_arc[idx]
@@ -54,6 +54,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
         # self.arc_detector.db.plot_emd(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
         #                               save_name=f'{case_name}_{key}.png', show=self.plot_show)
         self.arc_detector.save_samples(path_save=self.svm_label_file)
+        self.arc_detector.save_seq()
         self.arc_detector.reset()
 
     def run(self):
