@@ -98,7 +98,7 @@ class Pico5444DMSO(PicoBase):
 
     def _streaming_callback(self, handle, noOfSamples, startIndex, overflow, triggerAt, triggered, autoStop, param):
         self.wasCalledBack = True
-        self.data_queue.put(self.bufferAMax.copy(), self.bufferBMax.copy())
+        self.data_queue.put((self.bufferAMax.copy(), self.bufferBMax.copy()))
         # destEnd = self.nextSample + noOfSamples
         # sourceEnd = startIndex + noOfSamples
         # self.bufferCompleteA[self.nextSample:destEnd] = self.bufferAMax[startIndex:sourceEnd]
@@ -250,9 +250,9 @@ def afdd_process(data_queue, overflow_queue, stop_event):
         np.save(os.path.join(_save_dir, 'paseq_power.npy'),
                 (np.array(arc_detector.db.db['rt'].seq_power) - 2048) * 40 / 2048
                 )
-        np.save(os.path.join(_save_dir, 'cur_state_gt_normal.npy'),
-                np.array(arc_detector.db.db['rt'].cur_state_gt_normal)
-                )
+        # np.save(os.path.join(_save_dir, 'cur_state_gt_normal.npy'),
+        #         np.array(arc_detector.db.db['rt'].cur_state_gt_normal)
+        #         )
 
 
 if __name__ == '__main__':

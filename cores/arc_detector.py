@@ -73,7 +73,7 @@ class ArcDetector:
         self.sub_sample_cnt = 1
 
     def _build_model(self,
-                     path_model='/home/manu/tmp/afdd_models/best_e21.pt'):
+                     path_model='/home/manu/tmp/afdd_models/best_e31.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(ckpt=path_model)
