@@ -1,3 +1,4 @@
+import h5py
 import numpy as np
 import pywt
 import torch
@@ -136,6 +137,8 @@ class SignalDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         x_sample = self.x[idx]
+        ones = np.ones(len(x_sample))
+        x_sample = np.concatenate((x_sample, ones))
         y_sample = self.y[idx] if self.y is not None else None
         x_signal = self.transform(x_sample, self.seq_len)
         if y_sample is not None:
@@ -143,6 +146,30 @@ class SignalDataset(torch.utils.data.Dataset):
             return x_signal, y_tensor
         else:
             return x_signal
+
+
+class HDF5Dataset(torch.utils.data.Dataset):
+    def __init__(self, hdf5_file_path, transform):
+        self.hdf5_file_path = hdf5_file_path
+        self.hdf5_file = h5py.File(hdf5_file_path, 'r')
+        self.labels = self.hdf5_file['labels']
+        self.features = self.hdf5_file['features']
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __del__(self):
+        self.hdf5_file.close()
+
+    def __getitem__(self, idx):
+        x_sample = self.features[idx]
+        ones = np.ones(len(x_sample))
+        x_sample = np.concatenate((x_sample, ones))
+        y_sample = self.labels[idx]
+        x_signal = self.transform(x_sample, len(self.labels))
+        y_tensor = torch.tensor(y_sample, dtype=torch.float32).view(-1)
+        return x_signal, y_tensor
 
 
 class InferenceDataset(torch.utils.data.Dataset):

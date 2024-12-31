@@ -232,6 +232,7 @@ class DataRT(DataBase):
         seq_state_gt_arc: list = field(default_factory=list)
         seq_state_gt_normal: list = field(default_factory=list)
         seq_state_pred_arc: list = field(default_factory=list)
+        seq_state_pred_idle: list = field(default_factory=list)
         seq_state_pred_classifier: list = field(default_factory=list)
         seq_state_pred_balcony: list = field(default_factory=list)
         seq_wt_power_bg: list = field(default_factory=list)
@@ -255,6 +256,7 @@ class DataRT(DataBase):
         self.db['rt'].seq_peak_mean.append(0)
         self.db['rt'].seq_wavelet.append([0] * self.wavelet_max_level)
         self.db['rt'].seq_state_pred_arc.append(0)
+        self.db['rt'].seq_state_pred_idle.append(0)
         self.db['rt'].seq_state_pred_classifier.append(0)
         self.db['rt'].seq_state_pred_balcony.append(0)
         self.db['rt'].seq_state_gt_arc.append(cur_state_gt_arc)
@@ -274,6 +276,7 @@ class DataRT(DataBase):
         seq_peak_mean = self.db[key].seq_peak_mean
         seq_len = self.db[key].seq_len
         seq_state_pred_arc = self.db[key].seq_state_pred_arc
+        seq_state_pred_idle = self.db[key].seq_state_pred_idle
         seq_state_pred_classifier = self.db[key].seq_state_pred_classifier
         seq_state_pred_balcony = self.db[key].seq_state_pred_balcony
         seq_state_arc = self.db[key].seq_state_gt_arc
@@ -286,13 +289,14 @@ class DataRT(DataBase):
         plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
         plt.plot(time_stamps, np.array(seq_state_pred_balcony).astype(float), label='seq_state_pred_balcony')
         plt.plot(time_stamps, np.array(seq_state_pred_classifier).astype(float), label='seq_state_pred_classifier')
-        # plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred', color='red')
+        plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred', color='red')
         plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
         # plt.plot(time_stamps, np.array(seq_power_mean).astype(float), label='power_mean')
-        # plt.plot(time_stamps, np.array(seq_peak_mean).astype(float), label='seq_peak_mean')
+        plt.plot(time_stamps, np.array(seq_peak_mean).astype(float), label='seq_peak_mean')
         plt.plot(info_pred_peaks, np.array(seq_power).astype(float)[info_pred_peaks], 'x', label='peaks')
         # plt.plot(info_eval_peaks, np.array(seq_power).astype(float)[info_eval_peaks], 'o', label='peaks_e')
+        plt.plot(time_stamps, np.array(seq_state_pred_idle).astype(float), label='state_idle_pred')
         for i, peak in enumerate(info_pred_peaks):
             plt.annotate(f'{info_af_scores[i]: .2f}',
                          (peak, seq_power[peak]),

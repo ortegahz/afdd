@@ -18,7 +18,9 @@ class ArcDetector:
         self._build_model()
         self.ini_peak_cnt = 0
         self.peak_interval_pred = -1
+        self.peaks_init = []
         self.power_mean = -1
+        self.peak_lr = 1e-3
         self.pm_lr = 1e-4
         self.peak_mean = -1
         self.wavelet_type = 'sym2'
@@ -72,8 +74,7 @@ class ArcDetector:
         self.peak_bulge_cnt = 0
         self.sub_sample_cnt = 1
 
-    def _build_model(self,
-                     path_model='/home/manu/tmp/afdd_models/best_e31.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models_v2/best_v4.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(ckpt=path_model)
@@ -418,6 +419,9 @@ class ArcDetector:
         _min_val_th = MIN_VAL_TH
         _th_raw = 2048 * 0.8
         _ini_peak_cnt_th = 8
+        if self.peak_miss_cnt > self.af_win_size * 16:
+            self.db.db['rt'].seq_state_pred_idle[-1] = self.indicator_max_val / 8
+            self.ini_peak_cnt = 0
         if self.db.db['rt'].seq_len < self.af_win_size:  # waiting for enough data
             return
         # assign self.alarm_arc_idx_e when long time peak miss
@@ -474,7 +478,7 @@ class ArcDetector:
         self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
             else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
         self.db.db['rt'].seq_power_mean[-1] = self.power_mean
-        _scale_peak_mean = 1.2
+        _scale_peak_mean = 1.
         self.db.db['rt'].seq_peak_mean[-1] = self.peak_mean * _scale_peak_mean if self.peak_mean > 0 else 0
         peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size,
                                           peak_th=self.power_mean + _min_val_th)
@@ -501,7 +505,8 @@ class ArcDetector:
         self.peak_anchor_idx = peak_idx
         self.peak_miss_cnt = 0
         _peak_val = self.db.db['rt'].seq_power[peak_idx]
-        self.peak_mean = self.peak_mean * (1 - self.pm_lr) + _peak_val * self.pm_lr if self.peak_mean > 0 else _peak_val
+        self.peak_mean = self.peak_mean * (
+                1 - self.peak_lr) + _peak_val * self.peak_lr if self.peak_mean > 0 else _peak_val
         self.alarm_overload_cnt = \
             self.alarm_overload_cnt + 1 if _peak_val > self.indicator_max_val else self.alarm_overload_cnt
         # if peak_idx - self.last_peak_idx > self.af_win_size * 1.2 and len(self.db.db['rt'].info_eval_peaks) > 1:
@@ -571,8 +576,18 @@ class ArcDetector:
         # self.alarm_arc_cnt = self.alarm_arc_cnt - 4 if self.alarm_arc_descend_peak_cnt > 4 else self.alarm_arc_cnt
         self.db.db['rt'].info_af_scores.append(self.alarm_arc_cnt)
         self.alarm_arc_idx_s = peak_idx if self.alarm_arc_idx_s < 0 and _is_arc else self.alarm_arc_idx_s
-        self.alarm_arc_idx_e = peak_idx if self.alarm_arc_idx_s > 0 and not _is_arc and self.ini_peak_cnt > _ini_peak_cnt_th \
-            else self.alarm_arc_idx_e
+        if self.alarm_arc_idx_s > 0 and not _is_arc and self.ini_peak_cnt > _ini_peak_cnt_th:
+            _drop = self.peak_mean - self.db.db['rt'].seq_power[peak_idx]
+            _drop_th = (self.peak_mean - self.power_mean) / 2.
+            if _drop > _drop_th:
+                logging.info(f'dropping --> {_drop} [{_drop_th}]')
+                self.alarm_arc_idx_e = peak_idx
+                self.db.db['rt'].seq_power[self.alarm_arc_idx_e - 2] = self.indicator_max_val * 1.8
+                self.db.db['rt'].info_pred_peaks.append(self.alarm_arc_idx_e - 2)
+                self.db.db['rt'].info_af_scores.append(_drop)
+                self.db.db['rt'].seq_power[self.alarm_arc_idx_e - 3] = self.indicator_max_val * 1.7
+                self.db.db['rt'].info_pred_peaks.append(self.alarm_arc_idx_e - 3)
+                self.db.db['rt'].info_af_scores.append(_drop_th)
         if self.alarm_arc_cnt > _alarm_arc_cnt_th:  # pre-alarm
             self.db.db['rt'].seq_state_pred_arc[peak_idx - self.af_win_size:peak_idx] = \
                 [self.indicator_max_val / 2] * self.af_win_size
@@ -646,6 +661,6 @@ class ArcDetector:
                     _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
                     self.db.db['rt'].seq_state_pred_arc[adjusted_peak_idx - self.af_win_size:adjusted_peak_idx] = \
                         [self.indicator_max_val / 2] * self.af_win_size
-                    self.samples_pos.append(_seq_pick)
+                    self.samples_neg.append(_seq_pick)
                     self.db.db['rt'].info_pred_peaks.append(adjusted_peak_idx)
                     self.db.db['rt'].info_af_scores.append(0.)

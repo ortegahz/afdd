@@ -4,12 +4,12 @@ import numpy as np
 import torch
 import torch.optim as optim
 import xgboost as xgb
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import f1_score
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 
 from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset, SignalDataset
-from cores.loss import FocalLoss
+from cores.loss import *
 from cores.nets import NetAFD
 
 
@@ -35,11 +35,11 @@ class ClassifierXGB(ClassifierBase):
 
 
 class ClassifierCNN(ClassifierBase):
-    def __init__(self, rank=0, ddp=False, ckpt=None):
+    def __init__(self, rank=0, ddp=False, ckpt=None, alpha=0.5):
         super().__init__()
         self.local_rank = 0
         self.num_epochs = 256
-        self.lr = 1e-3
+        self.lr = 1e-4
         self.model = NetAFD().to(self.local_rank)
         self.optimizer = optim.Adam(self.model.parameters(), self.lr)
         if ckpt is not None:
@@ -47,7 +47,7 @@ class ClassifierCNN(ClassifierBase):
             # self._load_checkpoint_v1(ckpt)
         if ddp:
             self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
-        self.criterion = FocalLoss().to(self.local_rank)
+        self.criterion = FocalLossV0().to(self.local_rank)
         self.features_generator = FeaturesGeneratorCNN()
         self.rank = rank
 
@@ -110,6 +110,8 @@ class ClassifierCNN(ClassifierBase):
                 if val_accuracy > best_accuracy:
                     best_accuracy = val_accuracy
                     torch.save(self.model.state_dict(), f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/best_e{epoch}.pt')
+                    # torch.save(self.model.state_dict(),
+                    #            f'/home/Huangzhe/test/manu-pc/tmp/afdd_models_local/best_e{epoch}.pt')
                     logging.info(f'Saved new best model with accuracy: {best_accuracy:.4f}')
 
                 # torch.save(self.model.state_dict(), f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/{epoch}.pt')
@@ -146,5 +148,6 @@ class ClassifierCNN(ClassifierBase):
                 all_predictions.extend(batch_predictions)
                 all_labels.extend(labels.cpu().numpy())
         predictions = [1 if prob > 0.5 else 0 for prob in all_predictions]
-        accuracy = accuracy_score(all_labels, predictions)
-        return accuracy
+        # result = accuracy_score(all_labels, predictions)
+        result = f1_score(all_labels, predictions)
+        return result

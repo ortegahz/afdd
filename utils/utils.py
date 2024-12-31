@@ -30,7 +30,7 @@ def load_bin(path, int_size=2):
     return int_list
 
 
-def svm_label2data(path_label):
+def svm_label2data_v0(path_label):
     with open(path_label, 'r') as file:
         lines = file.readlines()
     x, y = list(), list()
@@ -41,6 +41,20 @@ def svm_label2data(path_label):
         # logging.info(line_lst)
         y.append(int(line_lst[0]))
         x.append([float(item.split(':')[1]) for item in line_lst[1:]])
+    return np.array(x).astype(np.float32), np.array(y).astype(np.int64)
+
+
+def svm_label2data_v1(path_label, lidx=-1):
+    with open(path_label, 'r') as file:
+        lines = file.readlines()
+    x, y = list(), list()
+    for i, line in enumerate(lines):
+        if i > lidx > 0:
+            break
+        line_lst = line.strip().split(',')
+        # logging.info(line_lst)
+        y.append(int(line_lst[0]))
+        x.append([float(item) for item in line_lst[1:]])
     return np.array(x).astype(np.float32), np.array(y).astype(np.int64)
 
 
