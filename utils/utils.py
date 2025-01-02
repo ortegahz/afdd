@@ -64,3 +64,15 @@ def feature_engineering(data):
     fft_magnitude = np.abs(fft_values)
     data_new = np.concatenate([data_array, fft_magnitude], axis=1)
     return data_new
+
+
+def load_data(path_label, lidx=-1):
+    x, y = svm_label2data_v1(path_label, lidx)
+    y[y < 0] = 0
+    # ros = RandomOverSampler(sampling_strategy='auto')
+    # x, y = ros.fit_resample(x, y)
+    # logging.info(f'ros -> {Counter(y)}')
+    num_pos = np.sum(y > 0)
+    num_neg = len(y) - num_pos
+    alpha = num_neg / (num_pos + num_neg)
+    return x, y, alpha

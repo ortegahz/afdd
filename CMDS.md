@@ -12,3 +12,5 @@ python -m torch.distributed.launch --nproc_per_node=1 --use_env demos/demo_class
 
 python -m torch.distributed.launch --nproc_per_node=1 --use_env demos/demo_classifier.py
 screen python -m torch.distributed.launch --nproc_per_node=1 --use_env demos/demo_classifier.py
+
+torchrun --nproc_per_node=4 --master_port=12345 demos/demo_classifier.py
