@@ -1,5 +1,7 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from thop import profile
 
 from utils.macros import SAMPLE_RATE
 
@@ -36,3 +38,9 @@ class NetAFD(nn.Module):
         x = self.fc2(x)
 
         return x
+
+
+if __name__ == '__main__':
+    input_tensor = torch.randn(1, 1, int(SAMPLE_RATE / 50 * 2))
+    macs, params = profile(NetAFD(), inputs=(input_tensor,))
+    print(f"MACs: {macs}, Parameters: {params}")

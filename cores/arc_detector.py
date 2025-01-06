@@ -77,7 +77,7 @@ class ArcDetector:
     def _build_model(self, path_model='/home/manu/tmp/afdd_models/best_e68.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
-        self.classifier = ClassifierCNN(ckpt=path_model)
+        self.classifier = ClassifierCNN(args=path_model, is_infer=True)
         # _state_dict = torch.load(path_model, map_location=torch.device('cuda:0'))
         # _new_state_dict = {}
         # for k, v in _state_dict.items():

@@ -14,7 +14,7 @@ from utils import set_logging, make_dirs, load_data
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--path_label_train', default='/home/Huangzhe/test/afd_pm_train')
-    parser.add_argument('--save_dir', default='/home/Huangzhe/test/afd_pm_hdf5')
+    parser.add_argument('--save_dir', default='/dev/shm/afd_pm_hdf5')
     return parser.parse_args()
 
 
@@ -37,13 +37,13 @@ def svm2hdf5(args):
 
     # Save training data in HDF5 format
     with h5py.File(train_hdf5_path, 'w') as f:
-        f.create_dataset('x_train', data=x_train, compression='gzip')
-        f.create_dataset('y_train', data=y_train, compression='gzip')
+        f.create_dataset('features', data=x_train)
+        f.create_dataset('labels', data=y_train)
 
     # Save testing data in HDF5 format
     with h5py.File(test_hdf5_path, 'w') as f:
-        f.create_dataset('x_test', data=x_test, compression='gzip')
-        f.create_dataset('y_test', data=y_test, compression='gzip')
+        f.create_dataset('features', data=x_test)
+        f.create_dataset('labels', data=y_test)
 
 
 def main():

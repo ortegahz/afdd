@@ -167,7 +167,7 @@ class HDF5Dataset(torch.utils.data.Dataset):
         ones = np.ones(len(x_sample))
         x_sample = np.concatenate((x_sample, ones))
         y_sample = self.labels[idx]
-        x_signal = self.transform(x_sample, len(self.labels))
+        x_signal = self.transform(x_sample, int(SAMPLE_RATE / 50))
         y_tensor = torch.tensor(y_sample, dtype=torch.float32).view(-1)
         return x_signal, y_tensor
 
