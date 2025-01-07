@@ -23,6 +23,7 @@ class ArcDetector:
         self.peak_lr = 1e-3
         self.pm_lr = 1e-4
         self.peak_mean = -1
+        self.peak_update_cnt = MEAN_PEAK_UPDATE_CNT_TH
         self.wavelet_type = 'sym2'
         self.wavelet_max_level = 1
         self.wavelet_window_size = 256
@@ -74,7 +75,7 @@ class ArcDetector:
         self.peak_bulge_cnt = 0
         self.sub_sample_cnt = 1
 
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models/best_e68.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v0/best_e205.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -113,6 +114,7 @@ class ArcDetector:
             self._update_svm_label_file(seq_pick, path_out=path_save, subset='neg')
 
     def reset(self):
+        self.peak_update_cnt = MEAN_PEAK_UPDATE_CNT_TH
         self.ini_peak_cnt = 0
         self.peak_interval_pred = -1
         self.peak_mean = -1
@@ -505,8 +507,9 @@ class ArcDetector:
         self.peak_anchor_idx = peak_idx
         self.peak_miss_cnt = 0
         _peak_val = self.db.db['rt'].seq_power[peak_idx]
+        self.peak_update_cnt = self.peak_update_cnt + 1 if abs(self.peak_mean - _peak_val) > 64 else 0
         self.peak_mean = self.peak_mean * (
-                1 - self.peak_lr) + _peak_val * self.peak_lr if self.peak_mean > 0 else _peak_val
+                1 - self.peak_lr) + _peak_val * self.peak_lr if self.peak_update_cnt < MEAN_PEAK_UPDATE_CNT_TH else _peak_val
         self.alarm_overload_cnt = \
             self.alarm_overload_cnt + 1 if _peak_val > self.indicator_max_val else self.alarm_overload_cnt
         # if peak_idx - self.last_peak_idx > self.af_win_size * 1.2 and len(self.db.db['rt'].info_eval_peaks) > 1:
@@ -578,7 +581,7 @@ class ArcDetector:
         self.alarm_arc_idx_s = peak_idx if self.alarm_arc_idx_s < 0 and _is_arc else self.alarm_arc_idx_s
         if self.alarm_arc_idx_s > 0 and not _is_arc and self.ini_peak_cnt > _ini_peak_cnt_th:
             _drop = self.peak_mean - self.db.db['rt'].seq_power[peak_idx]
-            _drop_th = (self.peak_mean - self.power_mean) / 2.
+            _drop_th = (self.peak_mean - self.power_mean) / 2.5
             if _drop > _drop_th:
                 logging.info(f'dropping --> {_drop} [{_drop_th}]')
                 self.alarm_arc_idx_e = peak_idx

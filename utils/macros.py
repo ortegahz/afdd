@@ -5,3 +5,4 @@ SAMPLE_RATE = 8.93 * 1000 * 1000 / 400
 DEVICE = 'cuda:0'
 # DEVICE = 'cpu'
 MIN_VAL_TH = 64
+MEAN_PEAK_UPDATE_CNT_TH = 50 * 2  # x seconds

@@ -10,8 +10,8 @@ from utils.utils import set_logging
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--load_dir', default='/home/manu/tmp/afd_pm_hdf5')
-    parser.add_argument('--path_ckpt', default='/home/manu/tmp/afdd_models/best_e68.pt')
+    parser.add_argument('--load_dir', default='/home/manu/tmp/afd_pm_hdf5_v0')
+    parser.add_argument('--path_ckpt', default='/home/manu/tmp/afdd_models_mp_v0/best_e205.pt')
     return parser.parse_args()
 
 
