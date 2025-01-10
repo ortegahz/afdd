@@ -240,7 +240,7 @@ def afdd_process(data_queue, overflow_queue, stop_event):
                         cur_hf=1.0,
                         cur_state_gt_arc=0.0,
                         cur_state_gt_normal=current_values_B)
-                    arc_detector.infer_v2()
+                    arc_detector.infer_v3()  # same as demo.py !!!
                 if arc_detector.db.db['rt'].seq_len > arc_detector.sample_rate * 60 * 16:
                     print('<reset>')
                     arc_detector.reset()

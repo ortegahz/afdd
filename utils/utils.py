@@ -1,8 +1,10 @@
 import logging
 import os
 import shutil
+from collections import Counter
 
 import numpy as np
+from imblearn.over_sampling import RandomOverSampler
 
 
 def set_logging():
@@ -69,10 +71,10 @@ def feature_engineering(data):
 def load_data(path_label, lidx=-1):
     x, y = svm_label2data_v1(path_label, lidx)
     y[y < 0] = 0
-    # ros = RandomOverSampler(sampling_strategy='auto')
-    # x, y = ros.fit_resample(x, y)
-    # logging.info(f'ros -> {Counter(y)}')
-    num_pos = np.sum(y > 0)
-    num_neg = len(y) - num_pos
-    alpha = num_neg / (num_pos + num_neg)
-    return x, y, alpha
+    ros = RandomOverSampler(sampling_strategy='auto')
+    x_aug, y_aug = ros.fit_resample(x, y)
+    logging.info(f'ros -> {Counter(y_aug)}')
+    # num_pos = np.sum(y_aug > 0)
+    # num_neg = len(y_aug) - num_pos
+    # alpha = num_neg / (num_pos + num_neg)
+    return x, y, x_aug, y_aug

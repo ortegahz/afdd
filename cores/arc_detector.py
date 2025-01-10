@@ -75,7 +75,9 @@ class ArcDetector:
         self.peak_bulge_cnt = 0
         self.sub_sample_cnt = 1
 
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v0/best_e205.pt'):
+    # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v9 -  [v8] + data_v9/afdd_models/best_v4.pt'):
+    # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v10 - [v9] + data_v8hard/afdd_models - 8gpu/afdd_models_mp_r1/best_e222_b0.8714.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e129_b0.8571.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -568,7 +570,7 @@ class ArcDetector:
         self.alarm_arc_cnt = \
             self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt
         if (self.af_win_size * 1.5 < peak_idx - self.last_peak_idx < self.af_win_size * 3
-                and self.ini_peak_cnt > _ini_peak_cnt_th):
+                and self.ini_peak_cnt > _ini_peak_cnt_th and self.alarm_arc_cnt > 0.5):
             self.alarm_arc_cnt += (peak_idx - self.last_peak_idx) / self.af_win_size
             # logging.info(f'padding [{peak_idx}] self.alarm_arc_cnt -- > {self.alarm_arc_cnt}')
             self.db.db['rt'].seq_state_gt_normal[self.last_peak_idx:peak_idx] = \

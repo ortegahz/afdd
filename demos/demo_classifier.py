@@ -2,7 +2,6 @@ import argparse
 import logging
 import os
 import pickle
-from collections import Counter
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,7 +13,6 @@ from xgboost import plot_importance
 
 from cores.classifier import ClassifierXGB, ClassifierCNN
 from utils.utils import set_logging, svm_label2data_v1
-from imblearn.over_sampling import RandomOverSampler
 
 
 def parse_args():
@@ -88,12 +86,6 @@ def run_cnn(args):
         'test_path': os.path.join(args.load_dir, 'test_data.h5'),
     }
     classifier.train(_data)
-    if args.local_rank == 0:
-        # classifier.model.load_state_dict(torch.load(args.path_save, map_location=f'cuda:{args.local_rank}'))
-        # with open(args.path_save, 'rb') as f:
-        #     classifier = pickle.load(f)
-        val_accuracy = classifier.evaluate(_data['test_path'])
-        logging.info(f'best val_accuracy -> {val_accuracy}')
 
 
 def main_worker(rank, world_size, args):

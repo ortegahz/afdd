@@ -35,7 +35,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
         db_offline_single = self.db_offline.db[key]
         # for idx in range(0, db_offline_single.len, self.arc_detector.sub_sample_rate):
         for idx in range(0, db_offline_single.len):
-            # if idx < 0.6 * 1e6 or idx > 0.85 * 1e6:
+            # if idx < 0.2 * 1e6 or idx > 0.5 * 1e6:
             #     continue
             cur_power = db_offline_single.seq_power[idx]
             cur_hf = db_offline_single.seq_hf[idx]
