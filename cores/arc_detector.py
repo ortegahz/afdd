@@ -77,7 +77,8 @@ class ArcDetector:
 
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v9 -  [v8] + data_v9/afdd_models/best_v4.pt'):
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v10 - [v9] + data_v8hard/afdd_models - 8gpu/afdd_models_mp_r1/best_e222_b0.8714.pt'):
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e129_b0.8571.pt'):
+    # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e283_b0.8894.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e337_b0.8917.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -421,8 +422,10 @@ class ArcDetector:
     def infer_v3(self):
         _alarm_arc_cnt_th = 3
         _min_val_th = MIN_VAL_TH
-        _th_raw = 2048 * 0.8
+        _th_raw = 2048 * 1.0
         _ini_peak_cnt_th = 8
+        if self.alarm_overload_cnt > 0:
+            self.db.db['rt'].seq_state_pred_idle[-1] = self.indicator_max_val
         if self.peak_miss_cnt > self.af_win_size * 16:
             self.db.db['rt'].seq_state_pred_idle[-1] = self.indicator_max_val / 8
             self.ini_peak_cnt = 0
@@ -461,6 +464,7 @@ class ArcDetector:
             # logging.info(f'self.alarm_arc_idx_s --> {self.alarm_arc_idx_s}')
             # logging.info(f'self.last_peak_idx --> {self.last_peak_idx}')
             if _hf_cnt > 0 and self.alarm_arc_cnt > _alarm_arc_cnt_th:
+                _alarm_indicate_scale = 1.5
                 # logging.info(f'alarm idx --> {self.last_peak_idx}')
                 # self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx_e - self.af_win_size:self.alarm_arc_idx_e] = \
                 #     [self.indicator_max_val * 99 / 100] * self.af_win_size
@@ -471,11 +475,11 @@ class ArcDetector:
                         print('arc fault alarm !!!')
                         self.db.db['rt'].seq_state_pred_arc[
                         self.alarm_arc_idx_e - self.af_win_size:self.alarm_arc_idx_e] = \
-                            [self.indicator_max_val * 99 / 100] * self.af_win_size
+                            [self.indicator_max_val * _alarm_indicate_scale] * self.af_win_size
                 else:
                     print('arc fault alarm !!!')
                     self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx_e - self.af_win_size:self.alarm_arc_idx_e] = \
-                        [self.indicator_max_val * 99 / 100] * self.af_win_size
+                        [self.indicator_max_val * _alarm_indicate_scale] * self.af_win_size
             self.alarm_arc_idx_s, self.alarm_arc_idx_e = -1, -1
         power_pick = self.db.db['rt'].seq_power[-1]
         # logging.info(f'power_pick --> {power_pick}')
@@ -567,8 +571,8 @@ class ArcDetector:
         # _is_arc = _score > _alarm_arc_th or _cnt_arc * _scale_arc > _th_raw
         _model_w = 1.0
         _is_arc = (_model_w * _score * self.indicator_max_val + (1 - _model_w) * _cnt_arc * _scale_arc) > _th_raw
-        self.alarm_arc_cnt = \
-            self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt
+        self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt
+        self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc and self.alarm_overload_cnt > 0 else self.alarm_arc_cnt
         if (self.af_win_size * 1.5 < peak_idx - self.last_peak_idx < self.af_win_size * 3
                 and self.ini_peak_cnt > _ini_peak_cnt_th and self.alarm_arc_cnt > 0.5):
             self.alarm_arc_cnt += (peak_idx - self.last_peak_idx) / self.af_win_size
@@ -645,6 +649,76 @@ class ArcDetector:
                 self.db.db['rt'].info_pred_peaks.append(adjusted_peak_idx)
                 self.db.db['rt'].info_af_scores.append(0.)
         else:
+            _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
+            _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
+            _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
+            _seq_pick_ex = _seq_pick[np.newaxis, :]
+            _score = self.classifier.infer(_seq_pick_ex, batch_size=1)[0]
+            if _score > 0.3:
+                self.samples_neg.append(_seq_pick)
+                for _ in range(4):
+                    # Randomly adjust peak_idx within the range of ±64
+                    random_adjustment = random.randint(-adjustment_range, adjustment_range)
+                    adjusted_peak_idx = \
+                        max(self.af_win_size, min(peak_idx + random_adjustment, self.db.db['rt'].seq_len - 1))
+                    # adjusted_peak_idx = peak_idx
+                    _seq_pick_power = np.array(
+                        self.db.db['rt'].seq_power[adjusted_peak_idx - self.af_win_size:adjusted_peak_idx]).astype(
+                        float)
+                    _seq_pick_hf = np.array(
+                        self.db.db['rt'].seq_hf[adjusted_peak_idx - self.af_win_size:adjusted_peak_idx]).astype(float)
+                    _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
+                    self.db.db['rt'].seq_state_pred_arc[adjusted_peak_idx - self.af_win_size:adjusted_peak_idx] = \
+                        [self.indicator_max_val / 2] * self.af_win_size
+                    self.samples_neg.append(_seq_pick)
+                    self.db.db['rt'].info_pred_peaks.append(adjusted_peak_idx)
+                    self.db.db['rt'].info_af_scores.append(0.)
+
+    def sample_pos_v0(self):
+        if self.db.db['rt'].seq_len < self.af_win_size:  # waiting for enough data
+            return
+        power_pick = self.db.db['rt'].seq_power[-1]
+        self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
+            else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
+        self.db.db['rt'].seq_power_mean[-1] = self.power_mean
+        peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size,
+                                          peak_th=self.power_mean + MIN_VAL_TH)
+        peak_idx = self.db.db['rt'].seq_len - self.peak_eval_win_size // 2 if peak_idx_norm > 0 else -1
+        if peak_idx < 0:  # seq filter
+            return
+        adjustment_range = 64
+        if self.db.db['rt'].seq_state_gt_arc[peak_idx] > 0:  # peak in the range
+            for _ in range(32):  # Generate 16 positive samples
+                # Randomly adjust peak_idx within the range of ±64
+                random_adjustment = random.randint(-adjustment_range, adjustment_range)
+                adjusted_peak_idx = \
+                    max(self.af_win_size, min(peak_idx + random_adjustment, self.db.db['rt'].seq_len - 1))
+                # adjusted_peak_idx = peak_idx
+                _seq_pick_power = np.array(
+                    self.db.db['rt'].seq_power[adjusted_peak_idx - self.af_win_size:adjusted_peak_idx]).astype(float)
+                _seq_pick_hf = np.array(
+                    self.db.db['rt'].seq_hf[adjusted_peak_idx - self.af_win_size:adjusted_peak_idx]).astype(float)
+                _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
+                self.db.db['rt'].seq_state_pred_arc[adjusted_peak_idx - self.af_win_size:adjusted_peak_idx] = \
+                    [self.indicator_max_val / 2] * self.af_win_size
+                self.samples_pos.append(_seq_pick)
+                self.db.db['rt'].info_pred_peaks.append(adjusted_peak_idx)
+                self.db.db['rt'].info_af_scores.append(0.)
+
+    def sample_neg_v0(self):
+        if self.db.db['rt'].seq_len < self.af_win_size:  # waiting for enough data
+            return
+        power_pick = self.db.db['rt'].seq_power[-1]
+        self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
+            else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
+        self.db.db['rt'].seq_power_mean[-1] = self.power_mean
+        peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size,
+                                          peak_th=self.power_mean + MIN_VAL_TH)
+        peak_idx = self.db.db['rt'].seq_len - self.peak_eval_win_size // 2 if peak_idx_norm > 0 else -1
+        if peak_idx < 0:  # seq filter
+            return
+        adjustment_range = 64
+        if not self.db.db['rt'].seq_state_gt_arc[peak_idx] > 0:  # peak in the range
             _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
             _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
             _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)

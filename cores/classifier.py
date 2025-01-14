@@ -40,7 +40,7 @@ class ClassifierCNN(ClassifierBase):
     def __init__(self, args, ddp=False, is_infer=False):
         super().__init__()
         self.local_rank = args.rank if not is_infer else 0
-        self.num_epochs = 256
+        self.num_epochs = 512
         self.lr = 1e-4
         self.model = NetAFD().to(self.local_rank)
         self.optimizer = optim.Adam(self.model.parameters(), self.lr)
