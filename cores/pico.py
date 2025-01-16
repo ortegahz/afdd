@@ -233,6 +233,7 @@ def afdd_process(data_queue, overflow_queue, stop_event):
                 logging.info((data_queue.qsize(), len(new_data_A), len(new_data_B)))
                 current_values_A = adc2V(new_data_A, channel_range, maxADC, scale=100.)
                 current_values_B = adc2V(new_data_B, channel_range, maxADC, scale=10.)
+                # print(current_values_A[:4])
                 for idx in range(0, 512, arc_detector.sub_sample_rate):  # 512 should be same as pre-set buffer len
                     cur_power = current_values_A[idx] * 2048 / 40 + 2048
                     arc_detector.db.update(
@@ -247,7 +248,7 @@ def afdd_process(data_queue, overflow_queue, stop_event):
     finally:
         logging.info("Saving data and exiting...")
         _save_dir = r'C:\Users\admin\Desktop\manu'
-        np.save(os.path.join(_save_dir, 'paseq_power.npy'),
+        np.save(os.path.join(_save_dir, 'seq_power.npy'),
                 (np.array(arc_detector.db.db['rt'].seq_power) - 2048) * 40 / 2048
                 )
         # np.save(os.path.join(_save_dir, 'cur_state_gt_normal.npy'),

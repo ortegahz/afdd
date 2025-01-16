@@ -35,7 +35,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
         db_offline_single = self.db_offline.db[key]
         # for idx in range(0, db_offline_single.len, self.arc_detector.sub_sample_rate):
         for idx in range(0, db_offline_single.len):
-            # if idx < 6 * 1e6 or idx > 7 * 1e6:
+            # if idx < 0 * 1e6 or idx > 0.5 * 1e6:
             #     continue
             cur_power = db_offline_single.seq_power[idx]
             cur_hf = db_offline_single.seq_hf[idx]
@@ -48,13 +48,13 @@ class DetectorWrapperV0(DetectorWrapperBase):
             self.arc_detector.infer_v3()
             # self.arc_detector.sample()
         self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
-                                  save_name=f'{case_name}_{key}.png', show=self.plot_show)
+                                  save_name=f'{case_name}.png', show=self.plot_show)
         # self.arc_detector.db.plot_cwt(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
         #                           save_name=f'{case_name}_{key}.png', show=self.plot_show)
         # self.arc_detector.db.plot_emd(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
         #                               save_name=f'{case_name}_{key}.png', show=self.plot_show)
         self.arc_detector.save_samples(path_save=self.svm_label_file)
-        self.arc_detector.save_seq()
+        # self.arc_detector.save_seq()
         self.arc_detector.reset()
 
     def run(self):
@@ -190,6 +190,9 @@ class DetectorWrapperV3NPY(DetectorWrapperV2):
         _cnt = 0
         cases_path = glob.glob(os.path.join(self.addr, '**', '*.npy'), recursive=True)
         for i, case_path in enumerate(cases_path):
+            # if _cnt <= 22:
+            #     _cnt += 1
+            #     continue
             logging.info(f'[{len(cases_path)}] {i}th case_path: {case_path}')
             case_name, _ = os.path.splitext(os.path.basename(case_path))
             logging.info(f'case_name: {case_name}')
