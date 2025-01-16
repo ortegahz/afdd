@@ -77,8 +77,10 @@ class ArcDetector:
 
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v9 -  [v8] + data_v9/afdd_models/best_v4.pt'):
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v10 - [v9] + data_v8hard/afdd_models - 8gpu/afdd_models_mp_r1/best_e222_b0.8714.pt'):
-    # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e283_b0.8894.pt'):
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e337_b0.8917.pt'):
+    # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v11 - [v10] + data_v11/afdd_models_mp_r0_e256/best_e185_b0.8828.pt'):
+    # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v11 - [v10] + data_v11/afdd_models_mp_r1_e512/best_e337_b0.8917.pt'):
+    def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v11 - [v10] + data_v11/afdd_models_mp_r1_e512/best_e483_b0.9068.pt'):
+    # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v6/best_e101_b0.8824.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -424,7 +426,7 @@ class ArcDetector:
         _min_val_th = MIN_VAL_TH
         _th_raw = 2048 * 1.0
         _ini_peak_cnt_th = 8
-        if self.alarm_overload_cnt > 0:
+        if self.alarm_overload_cnt > 0 and self.ini_peak_cnt > _ini_peak_cnt_th:
             self.db.db['rt'].seq_state_pred_idle[-1] = self.indicator_max_val
         if self.peak_miss_cnt > self.af_win_size * 16:
             self.db.db['rt'].seq_state_pred_idle[-1] = self.indicator_max_val / 8
@@ -469,7 +471,7 @@ class ArcDetector:
                 # self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx_e - self.af_win_size:self.alarm_arc_idx_e] = \
                 #     [self.indicator_max_val * 99 / 100] * self.af_win_size
                 self.alarm_arc_state = 0
-                if self.ini_peak_cnt < _ini_peak_cnt_th * 2:
+                if self.ini_peak_cnt < 0:  # if self.ini_peak_cnt < _ini_peak_cnt_th * 2:
                     logging.info(f'self.peak_miss_cnt --> {self.peak_miss_cnt}')
                     if self.peak_miss_cnt > self.af_win_size * 1.5:
                         print('arc fault alarm !!!')
@@ -516,8 +518,9 @@ class ArcDetector:
         self.peak_update_cnt = self.peak_update_cnt + 1 if abs(self.peak_mean - _peak_val) > 64 else 0
         self.peak_mean = self.peak_mean * (
                 1 - self.peak_lr) + _peak_val * self.peak_lr if self.peak_update_cnt < MEAN_PEAK_UPDATE_CNT_TH else _peak_val
-        self.alarm_overload_cnt = \
-            self.alarm_overload_cnt + 1 if _peak_val > self.indicator_max_val else self.alarm_overload_cnt
+        # self.alarm_overload_cnt = self.alarm_overload_cnt + 1 if _peak_val > self.indicator_max_val else self.alarm_overload_cnt
+        _alarm_overload_cnt_set_val = 1
+        self.alarm_overload_cnt = _alarm_overload_cnt_set_val if _peak_val > self.indicator_max_val else self.alarm_overload_cnt
         # if peak_idx - self.last_peak_idx > self.af_win_size * 1.2 and len(self.db.db['rt'].info_eval_peaks) > 1:
         #     _peak_idx_pad = \
         #         self.db.db['rt'].info_eval_peaks[-1] if abs(
@@ -572,7 +575,9 @@ class ArcDetector:
         _model_w = 1.0
         _is_arc = (_model_w * _score * self.indicator_max_val + (1 - _model_w) * _cnt_arc * _scale_arc) > _th_raw
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt
-        self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc and self.alarm_overload_cnt > 0 else self.alarm_arc_cnt
+        self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if (_is_arc
+                                                        and self.alarm_overload_cnt > 0
+                                                        and self.ini_peak_cnt > _ini_peak_cnt_th) else self.alarm_arc_cnt
         if (self.af_win_size * 1.5 < peak_idx - self.last_peak_idx < self.af_win_size * 3
                 and self.ini_peak_cnt > _ini_peak_cnt_th and self.alarm_arc_cnt > 0.5):
             self.alarm_arc_cnt += (peak_idx - self.last_peak_idx) / self.af_win_size
@@ -586,8 +591,9 @@ class ArcDetector:
         self.db.db['rt'].info_af_scores.append(self.alarm_arc_cnt)
         self.alarm_arc_idx_s = peak_idx if self.alarm_arc_idx_s < 0 and _is_arc else self.alarm_arc_idx_s
         if self.alarm_arc_idx_s > 0 and not _is_arc and self.ini_peak_cnt > _ini_peak_cnt_th:
-            _drop = self.peak_mean - self.db.db['rt'].seq_power[peak_idx]
-            _drop_th = (self.peak_mean - self.power_mean) / 2.5
+            # _drop = self.peak_mean - self.db.db['rt'].seq_power[peak_idx]
+            # _drop_th = (self.peak_mean - self.power_mean) / 2.5
+            _drop, _drop_th = 1, -1  # disable
             if _drop > _drop_th:
                 logging.info(f'dropping --> {_drop} [{_drop_th}]')
                 self.alarm_arc_idx_e = peak_idx
@@ -654,9 +660,12 @@ class ArcDetector:
             _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
             _seq_pick_ex = _seq_pick[np.newaxis, :]
             _score = self.classifier.infer(_seq_pick_ex, batch_size=1)[0]
-            if _score > 0.3:
+            self.samples_neg.append(_seq_pick)  # sample all
+            self.db.db['rt'].info_pred_peaks.append(peak_idx)
+            self.db.db['rt'].info_af_scores.append(0.)
+            if _score > 1.0:  # set 1.0 to disable
                 self.samples_neg.append(_seq_pick)
-                for _ in range(4):
+                for _ in range(32):
                     # Randomly adjust peak_idx within the range of ±64
                     random_adjustment = random.randint(-adjustment_range, adjustment_range)
                     adjusted_peak_idx = \
