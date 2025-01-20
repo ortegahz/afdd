@@ -80,7 +80,7 @@ class ArcDetector:
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v11 - [v10] + data_v11/afdd_models_mp_r0_e256/best_e185_b0.8828.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v11 - [v10] + data_v11/afdd_models_mp_r1_e512/best_e337_b0.8917.pt'):
     def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v11 - [v10] + data_v11/afdd_models_mp_r1_e512/best_e483_b0.9068.pt'):
-    # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v6/best_e101_b0.8824.pt'):
+    # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e80_b0.8779.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -575,7 +575,7 @@ class ArcDetector:
         _model_w = 1.0
         _is_arc = (_model_w * _score * self.indicator_max_val + (1 - _model_w) * _cnt_arc * _scale_arc) > _th_raw
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt
-        self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if (_is_arc
+        self.alarm_arc_cnt = self.alarm_arc_cnt + 1.5 if (_is_arc
                                                         and self.alarm_overload_cnt > 0
                                                         and self.ini_peak_cnt > _ini_peak_cnt_th) else self.alarm_arc_cnt
         if (self.af_win_size * 1.5 < peak_idx - self.last_peak_idx < self.af_win_size * 3
@@ -638,12 +638,12 @@ class ArcDetector:
             return
         adjustment_range = 64
         if self.db.db['rt'].seq_state_gt_arc[peak_idx] > 0:  # peak in the range
-            for _ in range(32):  # Generate 16 positive samples
+            for i in range(32):  # Generate 16 positive samples
                 # Randomly adjust peak_idx within the range of ±64
                 random_adjustment = random.randint(-adjustment_range, adjustment_range)
                 adjusted_peak_idx = \
                     max(self.af_win_size, min(peak_idx + random_adjustment, self.db.db['rt'].seq_len - 1))
-                # adjusted_peak_idx = peak_idx
+                adjusted_peak_idx = peak_idx if i == 0 else adjusted_peak_idx
                 _seq_pick_power = np.array(
                     self.db.db['rt'].seq_power[adjusted_peak_idx - self.af_win_size:adjusted_peak_idx]).astype(float)
                 _seq_pick_hf = np.array(
