@@ -17,16 +17,24 @@ def parse_args():
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v3/demo测试数据/afd_data_v3',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v4/故障电弧测试数据-0904/afd_data_v4',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v5/故障电弧测试数据-0911/afd_data_v5',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v5/data_pick/neg/afd',  # new
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v6/故障电弧测试数据-0926/afd_data_v6',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v6/data_pick/并联金属性接触电弧试验/afd',  # new
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v6/data_pick/负载抑制性试验/afd',  # new
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v7/故障电弧测试数据-11.15/串并联碳化路径试验 - labeled/afd_data_v7',
-                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v7/故障电弧测试数据-11.15/负载抑制性试验1 - labeled/afd',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v7/故障电弧测试数据-11.15/负载抑制性试验1 - labeled/afd',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v8/故障电弧测试数据-11.28/afd_data_v8',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v8/hard_case/afd_data_v8_hard',
-                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v8/故障电弧测试数据-11.28/误报警试验 - labeled/反例/afd',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v8/故障电弧测试数据-11.28/误报警试验 - labeled/反例/afd',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v9/data_pick - labeled/data_pick_neg/afd_data_v9_neg',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v9/data_pick - labeled/data_pick_pos - labeled/afd_data_v9_pos',
-                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v10/data_pick/afd',  # new
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v11/data_pick/afd'
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v10/data_pick/负载抑制性实验/afd',  # new
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v10/data_pick/并联金属性接触/afd',  # new
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v11/data_pick/afd',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v12/试验数据2025-1-15/国标试验/并联金属性接触试验/afd',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v7/并联金属性接触电弧试验/afd',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v12/data_pick_neg/afd',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v12/data_pick_pos/afd',  # new
                         ])
     parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_train')
     # parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_test')

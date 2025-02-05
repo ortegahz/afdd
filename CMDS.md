@@ -1,6 +1,10 @@
-# install
+# missing case
 
+# install
 pip install pywavelets
+
+# data
+python utils/svm2hdf5.py
 
 # train
 
