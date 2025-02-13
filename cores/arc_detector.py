@@ -82,9 +82,10 @@ class ArcDetector:
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v11 - [v10] + data_v11/afdd_models_mp_r0_e256/best_e185_b0.8828.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v11 - [v10] + data_v11/afdd_models_mp_r1_e512/best_e337_b0.8917.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v11 - [v10] + data_v11/afdd_models_mp_r1_e512/best_e483_b0.9068.pt'):
-    def _build_model(self,
-                     path_model='/media/manu/ST8000DM004-2U91/afdd/models/v12 - [v11] + data_v12/afdd_models_mp_r0_e512/best_e474_b0.9193.pt'):
-        # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e80_b0.8779.pt'):
+    # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v12 - [v11] + data_v12/afdd_models_mp_r0_e512/best_e474_b0.9193.pt'):
+    # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v13 - [v12] + patch_5_6_7_10_11_12/afdd_models_mp_r0/best_e352_b0.9713.pt'):
+    def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v14 - [v13] + pos2s/afdd_models_mp_r0/best_e494_b0.9374.pt'):
+    # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e115_b0.8951.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -720,7 +721,14 @@ class ArcDetector:
         if peak_idx < 0:  # seq filter
             return
         if self.db.db['rt'].seq_power[peak_idx] > self.indicator_max_val:
-            self._peaks_sample(peak_idx)
+            self._peaks_sample(peak_idx, n_aug=1)  # no augmentation
+        else:  # add negs
+            _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
+            _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
+            _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
+            self.samples_neg.append(_seq_pick)
+            self.db.db['rt'].info_pred_peaks.append(peak_idx)
+            self.db.db['rt'].info_af_scores.append(0.)
 
     def sample_neg_v0(self):
         if self.db.db['rt'].seq_len < self.af_win_size:  # waiting for enough data
