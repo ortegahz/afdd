@@ -76,6 +76,7 @@ class ArcDetector:
         self.peak_bulge_cnt = 0
         self.sub_sample_cnt = 1
         self.alarm_idle_cnt = 0
+        self.feats_ref = []
 
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v9 -  [v8] + data_v9/afdd_models/best_v4.pt'):
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v10 - [v9] + data_v8hard/afdd_models - 8gpu/afdd_models_mp_r1/best_e222_b0.8714.pt'):
@@ -84,8 +85,9 @@ class ArcDetector:
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v11 - [v10] + data_v11/afdd_models_mp_r1_e512/best_e483_b0.9068.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v12 - [v11] + data_v12/afdd_models_mp_r0_e512/best_e474_b0.9193.pt'):
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v13 - [v12] + patch_5_6_7_10_11_12/afdd_models_mp_r0/best_e352_b0.9713.pt'):
-    def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v14 - [v13] + pos2s/afdd_models_mp_r0/best_e494_b0.9374.pt'):
-    # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e115_b0.8951.pt'):
+    # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v14 - [v13] + pos2s/afdd_models_mp_r0/best_e494_b0.9374.pt'):
+    # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v15 - [v14] + data_v13/afdd_models_mp_r1/best_e506_b0.9398.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e121_b0.9214.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -428,11 +430,28 @@ class ArcDetector:
         #         [self.indicator_max_val / 4 * 1] * self.af_win_size
         self.last_peak_idx = peak_idx
 
-    def infer_v3(self):
-        _alarm_arc_cnt_th = 2
-        _min_val_th = MIN_VAL_TH * 2
+    @staticmethod
+    def _cosine_similarity(a, b):
+        dot_product = np.dot(a, b)
+        norm_a = np.linalg.norm(a)
+        norm_b = np.linalg.norm(b)
+        return dot_product / (norm_a * norm_b)
+
+    def _max_cosine_similarity(self, _feat):
+        max_similarity = -1
+        best_match = None
+        for _feat_ref in self.feats_ref:
+            similarity = self._cosine_similarity(_feat, _feat_ref)
+            if similarity > max_similarity:
+                max_similarity = similarity
+                best_match = _feat_ref
+        return max_similarity, best_match
+
+    def infer_v3(self, feat_sample=False):
+        _alarm_arc_cnt_th = 3
+        _min_val_th = self.indicator_max_val / 2 * 0.05  # MIN_VAL_TH * 2
         _th_raw = 2048 * 1.0
-        _ini_peak_cnt_th = 16
+        _ini_peak_cnt_th = 64
         # _is_alarm_overload = self.alarm_overload_cnt > 0 and self.ini_peak_cnt > _ini_peak_cnt_th
         _is_alarm_overload = False
         if self.alarm_idle_cnt > 0:
@@ -454,12 +473,12 @@ class ArcDetector:
         # if self.alarm_overload_cnt > 2:
         #     print('overload alarm !!!')
         #     self.db.db['rt'].seq_state_pred_arc[self.last_peak_idx] = self.indicator_max_val * 64 / 100
-        _alarm_indicate_scale = 1.5
+        _alarm_indicate_scale = ALARM_INDICATE_SCALE
         if self.alarm_idle_cnt > 0 and self.ini_peak_cnt == 0:  # idle alarm confirm
             print('arc fault alarm !!!')
             self.db.db['rt'].seq_state_pred_arc[-1] = self.indicator_max_val * _alarm_indicate_scale
         if self.alarm_arc_idx_e > 0 and self.alarm_arc_idx_s > 0:
-            self.db.db['rt'].seq_power[self.alarm_arc_idx_e - 1] = self.indicator_max_val * 1.5  # for debug
+            # self.db.db['rt'].seq_power[self.alarm_arc_idx_e - 1] = self.indicator_max_val * 1.5  # affect demo_pico !
             self.db.db['rt'].info_pred_peaks.append(self.alarm_arc_idx_e - 1)
             self.db.db['rt'].info_af_scores.append(self.alarm_arc_cnt)
             self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx_e - self.af_win_size:self.alarm_arc_idx_e] = \
@@ -488,7 +507,7 @@ class ArcDetector:
                 #     [self.indicator_max_val * 99 / 100] * self.af_win_size
                 self.alarm_arc_state = 0
                 if self.ini_peak_cnt < _ini_peak_cnt_th:  # idle state alarm
-                    self.alarm_idle_cnt = 4
+                    self.alarm_idle_cnt = 8
                     # logging.info(f'self.peak_miss_cnt --> {self.peak_miss_cnt}')
                     # if self.peak_miss_cnt > self.af_win_size * 1.5:
                     #     print('arc fault alarm !!!')
@@ -569,8 +588,14 @@ class ArcDetector:
         _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
         _data = _seq_pick[np.newaxis, :]
-        _score = self.classifier.infer(_data, batch_size=1)[0]
+        _score, _feat = self.classifier.infer(_data, batch_size=1)
+        _score = _score[0]
         # logging.info(f'_score --> {_score}')
+        # logging.info(f'_feat --> {_feat}')
+        if not feat_sample:
+            _max_similarity, _ = self._max_cosine_similarity(_feat)
+            # logging.info(f'_max_similarity --> {_max_similarity}')
+            _score = 0 if _max_similarity > 0.999 else _score
         self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
             [_score * self.indicator_max_val] * self.af_win_size
         _delta_peak = self.db.db['rt'].seq_power[peak_idx] - self.db.db['rt'].seq_power[self.last_peak_idx]
@@ -595,6 +620,10 @@ class ArcDetector:
         # _is_arc = _score > _alarm_arc_th or _cnt_arc * _scale_arc > _th_raw
         _model_w = 1.0
         _is_arc = (_model_w * _score * self.indicator_max_val + (1 - _model_w) * _cnt_arc * _scale_arc) > _th_raw
+        if _is_arc and feat_sample:
+            self.feats_ref.append(_feat)
+            logging.info(f'len(self.feats_ref) --> {len(self.feats_ref)}')
+
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc and _is_alarm_overload else self.alarm_arc_cnt
         if (self.af_win_size * 1.5 < peak_idx - self.last_peak_idx < self.af_win_size * 3
@@ -664,7 +693,7 @@ class ArcDetector:
             self.db.db['rt'].info_pred_peaks.append(adjusted_peak_idx)
             self.db.db['rt'].info_af_scores.append(0.)
 
-    def sample(self):
+    def sample(self, pos_only=False):
         if self.db.db['rt'].seq_len < self.af_win_size:  # waiting for enough data
             return
         power_pick = self.db.db['rt'].seq_power[-1]
@@ -678,15 +707,16 @@ class ArcDetector:
             return
         if self.db.db['rt'].seq_state_gt_arc[peak_idx] > 0:  # peak in the range
             self._peaks_sample(peak_idx)
-        else:
+        elif not pos_only:
             _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
             _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
             _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
             _seq_pick_ex = _seq_pick[np.newaxis, :]
             _score = self.classifier.infer(_seq_pick_ex, batch_size=1)[0]
-            self.samples_neg.append(_seq_pick)  # sample all
-            self.db.db['rt'].info_pred_peaks.append(peak_idx)
-            self.db.db['rt'].info_af_scores.append(0.)
+            if self.db.db['rt'].seq_power[peak_idx] < self.indicator_max_val * ALARM_INDICATE_SCALE:  # ignore artificial noise
+                self.samples_neg.append(_seq_pick)  # sample all
+                self.db.db['rt'].info_pred_peaks.append(peak_idx)
+                self.db.db['rt'].info_af_scores.append(0.)
             if _score > 1.0:  # set 1.0 to disable
                 self.samples_neg.append(_seq_pick)
                 for _ in range(32):

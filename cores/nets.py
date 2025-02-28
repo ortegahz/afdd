@@ -34,10 +34,11 @@ class NetAFD(nn.Module):
         x = self.pool2(x)
 
         x = x.view(x.size(0), -1)
-        x = self.dropout(F.relu(self.fc1(x)))
+        feat = self.fc1(x)
+        x = self.dropout(F.relu(feat))
         x = self.fc2(x)
 
-        return x
+        return x, feat
 
 
 if __name__ == '__main__':

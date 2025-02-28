@@ -90,6 +90,26 @@ class ClassifierCNN(ClassifierBase):
             'best_accuracy': best_accuracy,
         }, path)
 
+    def _loss_computation(self, outputs, feats, labels):
+        std_loss = self.criterion(outputs, labels)
+        _labels = labels.squeeze(1)
+        pos_feats = feats[_labels == 1]
+        neg_feats = feats[_labels == 0]
+        cos_loss = 0
+        if len(pos_feats) > 0 and len(neg_feats) > 0:
+            pos_feats = F.normalize(pos_feats, p=2, dim=1)
+            neg_feats = F.normalize(neg_feats, p=2, dim=1)
+
+            # Computes cosine similarity here to ensure it gets into the computation graph
+            cos_sim = 1 - F.cosine_similarity(pos_feats.unsqueeze(1), neg_feats.unsqueeze(0), dim=2)
+            cos_sim = F.relu(cos_sim)
+            # Convert cos_sim into a loss term
+            cos_loss = cos_sim.mean()
+
+        _w_cos_loss = 0.1
+        loss = (1 - _w_cos_loss) * std_loss + _w_cos_loss * cos_loss
+        return std_loss, std_loss, cos_loss
+
     def train(self, data):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
@@ -104,8 +124,8 @@ class ClassifierCNN(ClassifierBase):
             for inputs, labels in loader:
                 inputs = inputs.to(self.local_rank)
                 labels = labels.to(self.local_rank)
-                outputs = self.model(inputs)
-                loss = self.criterion(outputs, labels)
+                outputs, feats = self.model(inputs)
+                loss, std_loss, cos_loss = self._loss_computation(outputs, feats, labels)
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
@@ -115,6 +135,8 @@ class ClassifierCNN(ClassifierBase):
             if self.rank == 0:
                 logging.info(
                     f'Epoch [{epoch + 1}/{self.num_epochs}],'
+                    f' Loss std: {std_loss.item():.8f},'
+                    f' Loss cos: {cos_loss.item():.8f},'
                     f' Loss: {loss.item():.8f},'
                     f' Validation Accuracy: {val_accuracy:.4f},'
                     f' Time: {epoch_duration:.2f} seconds')
@@ -136,14 +158,16 @@ class ClassifierCNN(ClassifierBase):
                                    seq_len=self.features_generator.seq_len)
         loader = DataLoader(dataset, batch_size=batch_size)
         self.model.eval()
-        predictions = []
+        predictions, features = [], []
         with torch.no_grad():
             for batch_x in loader:
                 batch_x = batch_x.to(self.local_rank)
-                outputs = self.model(batch_x)
+                outputs, feats = self.model(batch_x)
                 batch_predictions = torch.sigmoid(outputs).flatten().cpu().numpy()
                 predictions.extend(batch_predictions)
-        return np.array(predictions)
+                batch_feats = feats.flatten().cpu().numpy()
+                features.extend(batch_feats)
+        return np.array(predictions), np.array(features)
 
     def evaluate(self, test_path, batch_size=1024):
         # dataset = SignalDataset(x, y, transform=self.features_generator.transform_sample,
@@ -157,7 +181,7 @@ class ClassifierCNN(ClassifierBase):
             for inputs, labels in loader:
                 inputs = inputs.to(self.local_rank)
                 labels = labels.to(self.local_rank)
-                outputs = self.model(inputs)
+                outputs, _ = self.model(inputs)
                 batch_predictions = torch.sigmoid(outputs).flatten().cpu().numpy()
                 all_predictions.extend(batch_predictions)
                 all_labels.extend(labels.cpu().numpy())

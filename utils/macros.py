@@ -6,3 +6,4 @@ DEVICE = 'cuda:0'
 # DEVICE = 'cpu'
 MIN_VAL_TH = 32
 MEAN_PEAK_UPDATE_CNT_TH = 50 * 2  # x seconds
+ALARM_INDICATE_SCALE = 1.5

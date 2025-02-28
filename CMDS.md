@@ -19,6 +19,9 @@ screen python -m torch.distributed.launch --nproc_per_node=1 --use_env demos/dem
 
 torchrun --nproc_per_node=8 demos/demo_classifier.py
 screen torchrun --nproc_per_node=8 demos/demo_classifier.py
+torchrun --nproc_per_node=8 --master_addr=172.20.254.132 --master_port=29501 demos/demo_classifier.py
 
 # demo
-python demos/demo.py --dir_plot_save /home/manu/tmp/demo_arc_detector_save_single --dtr_type DetectorWrapperV0 --db_key default --addr "/media/manu/ST8000DM004-2U91/afdd/data/data_v7/故障电弧测试数据-11.15/负载抑制性试验1 - labeled/吸尘器.npy"
+python demos/demo.py --dir_plot_save /home/manu/tmp/demo_arc_detector_save_single --dtr_type DetectorWrapperV0 --db_key default --addr "/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v14/data_pick/neg/多负载运行（电机+日光灯）2.npy"
+
+python demos/demo.py --dir_plot_save /home/manu/tmp/demo_arc_detector_save_debug --dtr_type DetectorWrapperV3NPY --db_key default --addr "/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v14/tmp/"

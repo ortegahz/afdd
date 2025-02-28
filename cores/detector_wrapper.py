@@ -31,12 +31,12 @@ class DetectorWrapperV0(DetectorWrapperBase):
         if os.path.exists(self.svm_label_file):
             os.remove(self.svm_label_file)
 
-    def _process_single(self, key, case_name):
+    def _process_single(self, key, case_name, feat_sample=False):
         db_offline_single = self.db_offline.db[key]
         # for idx in range(0, db_offline_single.len, self.arc_detector.sub_sample_rate):
         for idx in range(0, db_offline_single.len):
-            if idx < 0.2 * 1e6 or idx > 0.4 * 1e6:
-                continue
+            # if idx < 0.0 * 1e6 or idx > 0.1 * 1e6:
+            #     continue
             cur_power = db_offline_single.seq_power[idx]
             cur_hf = db_offline_single.seq_hf[idx]
             cur_state_gt_arc = db_offline_single.seq_state_arc[idx]
@@ -45,8 +45,9 @@ class DetectorWrapperV0(DetectorWrapperBase):
                                         cur_hf=cur_hf,
                                         cur_state_gt_arc=cur_state_gt_arc,
                                         cur_state_gt_normal=cur_state_gt_normal)
-            self.arc_detector.infer_v3()
+            self.arc_detector.infer_v3(feat_sample=feat_sample)
             # self.arc_detector.sample()
+            # self.arc_detector.sample(pos_only=True)
             # self.arc_detector.sample_pos_v0()
         self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
                                   save_name=f'{case_name}.png', show=self.plot_show)
@@ -187,18 +188,19 @@ class DetectorWrapperV3NPY(DetectorWrapperV2):
         self.plot_show = False
         self.arc_detector = ArcDetector()
 
-    def run(self):
+    def run(self, _feat_sample=False):
         _cnt = 0
         cases_path = glob.glob(os.path.join(self.addr, '**', '*.npy'), recursive=True)
         for i, case_path in enumerate(cases_path):
-            # if _cnt <= 16:
+            # if _cnt <= 8:
             #     _cnt += 1
             #     continue
+            # _feat_sample = True if _cnt == 0 else False
             logging.info(f'[{len(cases_path)}] {i}th case_path: {case_path}')
             case_name, _ = os.path.splitext(os.path.basename(case_path))
             logging.info(f'case_name: {case_name}')
             self.db_offline = DataV4(case_path)
             self.db_offline.load()
             for key in self.db_offline.db.keys():
-                self._process_single(key, f'{_cnt}_' + case_name)
+                self._process_single(key, f'{_cnt}_' + case_name, feat_sample=_feat_sample)
                 _cnt += 1
