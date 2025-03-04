@@ -16,6 +16,7 @@ python -m torch.distributed.launch --nproc_per_node=1 --use_env demos/demo_class
 
 python -m torch.distributed.launch --nproc_per_node=1 --use_env demos/demo_classifier.py
 screen python -m torch.distributed.launch --nproc_per_node=1 --use_env demos/demo_classifier.py
+python -m torch.distributed.launch --nproc_per_node=1 --use_env demos/demo_classifier.py --save_dir /home/manu/tmp/afdd_models
 
 torchrun --nproc_per_node=8 demos/demo_classifier.py
 screen torchrun --nproc_per_node=8 demos/demo_classifier.py

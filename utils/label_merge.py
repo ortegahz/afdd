@@ -27,7 +27,7 @@ def parse_args():
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v8/故障电弧测试数据-11.28/afd_data_v8',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v8/hard_case/afd_data_v8_hard',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v8/故障电弧测试数据-11.28/误报警试验 - labeled/反例/afd',
-                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v9/data_pick - labeled/data_pick_neg/afd_data_v9_neg',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v9/data_pick - labeled/data_pick_neg/afd_data_v9_neg',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v9/data_pick - labeled/data_pick_pos - labeled/afd_data_v9_pos',
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v10/data_pick/负载抑制性实验/afd',
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v10/data_pick/并联金属性接触/afd',
@@ -35,11 +35,12 @@ def parse_args():
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v12/试验数据2025-1-15/国标试验/并联金属性接触试验/afd',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v12/data_pick_neg/afd',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v12/data_pick_pos/afd',
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v13/data_pick/负载抑制实验/afd',  # new
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v13/data_pick/误动作实验/afd',  # new
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v13/data_pick/自主设计实验正例/afd',  # new
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v13/data_pick/自主设计实验负例/afd',  # new
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v14/data_pick/neg/afd',  # new
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v13/data_pick/负载抑制实验/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v13/data_pick/误动作实验/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v13/data_pick/自主设计实验正例/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v13/data_pick/自主设计实验负例/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v14/data_pick/neg/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v15/data_pick/neg/afd',  # new
                         ])
     parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_train')
     # parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_test')

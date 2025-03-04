@@ -87,7 +87,7 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v13 - [v12] + patch_5_6_7_10_11_12/afdd_models_mp_r0/best_e352_b0.9713.pt'):
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v14 - [v13] + pos2s/afdd_models_mp_r0/best_e494_b0.9374.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v15 - [v14] + data_v13/afdd_models_mp_r1/best_e506_b0.9398.pt'):
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e121_b0.9214.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e193_b0.9313.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -625,7 +625,7 @@ class ArcDetector:
             logging.info(f'len(self.feats_ref) --> {len(self.feats_ref)}')
 
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt
-        self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc and _is_alarm_overload else self.alarm_arc_cnt
+        # self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc and _is_alarm_overload else self.alarm_arc_cnt
         if (self.af_win_size * 1.5 < peak_idx - self.last_peak_idx < self.af_win_size * 3
                 and self.ini_peak_cnt > _ini_peak_cnt_th and self.alarm_arc_cnt > 0.5):
             self.alarm_arc_cnt += (peak_idx - self.last_peak_idx) / self.af_win_size
