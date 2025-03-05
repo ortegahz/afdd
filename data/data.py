@@ -235,6 +235,7 @@ class DataRT(DataBase):
         seq_state_pred_idle: list = field(default_factory=list)
         seq_state_pred_classifier: list = field(default_factory=list)
         seq_state_pred_balcony: list = field(default_factory=list)
+        seq_state_pred_icr: list = field(default_factory=list)
         seq_wt_power_bg: list = field(default_factory=list)
         seq_wt_power_pioneer: list = field(default_factory=list)
         info_pred_peaks: list = field(default_factory=list)
@@ -259,6 +260,7 @@ class DataRT(DataBase):
         self.db['rt'].seq_state_pred_idle.append(0)
         self.db['rt'].seq_state_pred_classifier.append(0)
         self.db['rt'].seq_state_pred_balcony.append(0)
+        self.db['rt'].seq_state_pred_icr.append(0)
         self.db['rt'].seq_state_gt_arc.append(cur_state_gt_arc)
         self.db['rt'].seq_state_gt_normal.append(cur_state_gt_normal)
         self.db['rt'].seq_wt_power_bg.append([0] * self.wavelet_max_level)
@@ -279,6 +281,7 @@ class DataRT(DataBase):
         seq_state_pred_idle = self.db[key].seq_state_pred_idle
         seq_state_pred_classifier = self.db[key].seq_state_pred_classifier
         seq_state_pred_balcony = self.db[key].seq_state_pred_balcony
+        seq_state_pred_icr = self.db[key].seq_state_pred_icr
         seq_state_arc = self.db[key].seq_state_gt_arc
         seq_state_normal = self.db[key].seq_state_gt_normal
         info_pred_peaks = self.db[key].info_pred_peaks
@@ -297,6 +300,7 @@ class DataRT(DataBase):
         plt.plot(info_pred_peaks, np.array(seq_power).astype(float)[info_pred_peaks], 'x', label='peaks')
         # plt.plot(info_eval_peaks, np.array(seq_power).astype(float)[info_eval_peaks], 'o', label='peaks_e')
         plt.plot(time_stamps, np.array(seq_state_pred_idle).astype(float), label='state_idle_pred')
+        # plt.plot(time_stamps, np.array(seq_state_pred_icr).astype(float), label='seq_state_pred_icr')
         for i, peak in enumerate(info_pred_peaks):
             plt.annotate(f'{info_af_scores[i]: .2f}',
                          (peak, seq_power[peak]),

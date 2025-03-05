@@ -87,7 +87,8 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v13 - [v12] + patch_5_6_7_10_11_12/afdd_models_mp_r0/best_e352_b0.9713.pt'):
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v14 - [v13] + pos2s/afdd_models_mp_r0/best_e494_b0.9374.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v15 - [v14] + data_v13/afdd_models_mp_r1/best_e506_b0.9398.pt'):
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e193_b0.9313.pt'):
+    def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v17 - [v16] + data_v15/afdd_models_mp_r0+/best_e193_b0.9313.pt'):
+    # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e193_b0.9313.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -664,6 +665,14 @@ class ArcDetector:
         # if self.alarm_arc_idx_e > 0:
         #     self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx_e - self.af_win_size:self.alarm_arc_idx_e] = \
         #         [self.indicator_max_val / 4 * 1] * self.af_win_size
+        # _seq_pick_power_last = np.ones(len(_seq_pick_power)) * self.indicator_max_val / 2.
+        # if self.last_peak_idx > 0:
+        #     _seq_pick_power_last = np.array(
+        #         self.db.db['rt'].seq_power[self.last_peak_idx - self.af_win_size:self.last_peak_idx]).astype(float)
+        # _integral1, _integral2 = np.sum(_seq_pick_power), np.sum(_seq_pick_power_last)
+        # _integral_change_ratio = (_integral2 - _integral1) / _integral1
+        # self.db.db['rt'].seq_state_pred_icr[peak_idx - self.af_win_size:peak_idx] = \
+        #     [_integral_change_ratio * self.indicator_max_val * 64] * self.af_win_size
         self.last_peak_idx = peak_idx
 
     def _preprocess(self):
@@ -713,7 +722,8 @@ class ArcDetector:
             _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
             _seq_pick_ex = _seq_pick[np.newaxis, :]
             _score = self.classifier.infer(_seq_pick_ex, batch_size=1)[0]
-            if self.db.db['rt'].seq_power[peak_idx] < self.indicator_max_val * ALARM_INDICATE_SCALE:  # ignore artificial noise
+            if self.db.db['rt'].seq_power[
+                peak_idx] < self.indicator_max_val * ALARM_INDICATE_SCALE:  # ignore artificial noise
                 self.samples_neg.append(_seq_pick)  # sample all
                 self.db.db['rt'].info_pred_peaks.append(peak_idx)
                 self.db.db['rt'].info_af_scores.append(0.)
