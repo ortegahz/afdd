@@ -16,7 +16,7 @@ def parse_args():
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v2/subsample_v1 - wo pre-filter/afd_data_v2_wof',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v3/demo测试数据/afd_data_v3',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v4/故障电弧测试数据-0904/afd_data_v4',
-                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v5/故障电弧测试数据-0911/afd_data_v5',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v5/故障电弧测试数据-0911/afd_data_v5_new',
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v5/data_pick/neg/afd',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v6/故障电弧测试数据-0926/afd_data_v6',
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v6/data_pick/并联金属性接触电弧试验/afd',
@@ -40,7 +40,8 @@ def parse_args():
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v13/data_pick/自主设计实验正例/afd',
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v13/data_pick/自主设计实验负例/afd',
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v14/data_pick/neg/afd',
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v15/data_pick/neg/afd',  # new
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v15/data_pick/neg/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v16/data_pick/pos/afd',  # new
                         ])
     parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_train')
     # parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_test')

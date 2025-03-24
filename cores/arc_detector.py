@@ -87,8 +87,8 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v13 - [v12] + patch_5_6_7_10_11_12/afdd_models_mp_r0/best_e352_b0.9713.pt'):
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v14 - [v13] + pos2s/afdd_models_mp_r0/best_e494_b0.9374.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v15 - [v14] + data_v13/afdd_models_mp_r1/best_e506_b0.9398.pt'):
-    def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v17 - [v16] + data_v15/afdd_models_mp_r0+/best_e193_b0.9313.pt'):
-    # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e193_b0.9313.pt'):
+    # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v17 - [v16] + data_v15/afdd_models_mp_r0+/best_e193_b0.9313.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e305_b0.9580.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
