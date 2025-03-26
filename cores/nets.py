@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,7 +11,9 @@ from utils.macros import SAMPLE_RATE
 class NetAFD(nn.Module):
     def __init__(self):
         super(NetAFD, self).__init__()
-        self.channel_in = int(SAMPLE_RATE / 50) * 2
+        # self.channel_in = int(SAMPLE_RATE / 50) * 2
+        _channel_in = int(SAMPLE_RATE / 50)
+        self.channel_in = ((_channel_in // 32) + 1) * 32
         self.channel_out = 128
         self.channels = [32, 64]
         self.dropout_rate = 0.5
@@ -42,6 +46,21 @@ class NetAFD(nn.Module):
 
 
 if __name__ == '__main__':
-    input_tensor = torch.randn(1, 1, int(SAMPLE_RATE / 50 * 2))
+    _channel_in = int(SAMPLE_RATE / 50)
+    _channel_in = ((_channel_in // 32) + 1) * 32
+
+    input_tensor = torch.randn(1, 1, _channel_in)
     macs, params = profile(NetAFD(), inputs=(input_tensor,))
     print(f"MACs: {macs}, Parameters: {params}")
+
+    model = NetAFD()
+    input_tensor = torch.randn(1, 1, _channel_in)
+
+    # Measure inference time
+    start_time = time.time()
+    with torch.no_grad():  # Disable gradient calculation for inference
+        output, feat = model(input_tensor)
+    end_time = time.time()
+
+    inference_time_ms = (end_time - start_time) * 1000  # Convert to milliseconds
+    print(f"Inference Time (CPU): {inference_time_ms:.3f} ms")

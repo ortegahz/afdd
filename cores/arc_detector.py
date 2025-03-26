@@ -88,7 +88,7 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v14 - [v13] + pos2s/afdd_models_mp_r0/best_e494_b0.9374.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v15 - [v14] + data_v13/afdd_models_mp_r1/best_e506_b0.9398.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v17 - [v16] + data_v15/afdd_models_mp_r0+/best_e193_b0.9313.pt'):
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e305_b0.9580.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e245_b0.9699.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -585,8 +585,9 @@ class ArcDetector:
         _cnt_arc = _cnt_arc if _cnt_arc * _scale_arc < 4096 else 0
         self.db.db['rt'].seq_state_pred_balcony[peak_idx - self.af_win_size:peak_idx] = \
             [_cnt_arc * _scale_arc] * self.af_win_size
-        _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
-        _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
+        # _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
+        # _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
+        _seq_pick = _seq_pick_power
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
         _data = _seq_pick[np.newaxis, :]
         _score, _feat = self.classifier.infer(_data, batch_size=1)

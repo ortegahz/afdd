@@ -2,6 +2,7 @@ import h5py
 import numpy as np
 import pywt
 import torch
+import torch.nn.functional as F
 import xgboost as xgb
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import TensorDataset
@@ -81,6 +82,23 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
         self.transformer = StandardScaler()
         self.seq_len = int(SAMPLE_RATE / 50)
 
+    @staticmethod
+    def transform_sample(x_sample):
+        x_tensor = torch.tensor(x_sample, dtype=torch.float32)
+        x_signal = x_tensor.clone()
+        x_signal = (x_signal - 2048) / 4096
+        x_signal = x_signal.unsqueeze(0)
+
+        # Calculate padding necessary to make length a multiple of 32
+        current_length = x_signal.shape[-1]
+        padding_required = (32 - (current_length % 32)) % 32
+        padding = (0, padding_required)  # (left_pad, right_pad)
+
+        # Pad the signal
+        x_signal = F.pad(x_signal, padding, "constant", 0)
+
+        return x_signal
+
     # @staticmethod
     # def transform_sample(x_sample, seq_len):
     #     x_tensor = torch.tensor(x_sample, dtype=torch.float32)
@@ -101,24 +119,24 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
     #     x_signal = x_signal.unsqueeze(0)
     #     return x_signal
 
-    @staticmethod
-    def transform_sample(x_sample, seq_len, wavelet='db4', level=3):
-        x_tensor = torch.tensor(x_sample, dtype=torch.float32)
-        x_signal = x_tensor.clone()
-        x_signal[:seq_len] = (x_signal[:seq_len] - 2048) / 4096
-        x_time_np = x_signal[:seq_len].numpy()
-        _th_arc = (x_time_np[seq_len - 1] - np.mean(x_time_np)) * 0.01
-        _cnt_arc_norm = np.sum(np.abs(x_time_np - np.mean(x_time_np)) < _th_arc) / seq_len
-        x_signal[0:16] = _cnt_arc_norm  # anti-pool op
-        coeffs = pywt.wavedec(x_time_np, wavelet, level=level)
-        wavelet_coefficients = torch.from_numpy(np.concatenate(coeffs))
-        if wavelet_coefficients.numel() < len(x_signal[seq_len:]):
-            x_signal[seq_len:seq_len + len(wavelet_coefficients)] = wavelet_coefficients
-            x_signal[seq_len + len(wavelet_coefficients):] = 0
-        else:
-            x_signal[seq_len:] = wavelet_coefficients[:len(x_signal) - seq_len]
-        x_signal = x_signal.unsqueeze(0)
-        return x_signal
+    # @staticmethod
+    # def transform_sample(x_sample, seq_len, wavelet='db4', level=3):
+    #     x_tensor = torch.tensor(x_sample, dtype=torch.float32)
+    #     x_signal = x_tensor.clone()
+    #     x_signal[:seq_len] = (x_signal[:seq_len] - 2048) / 4096
+    #     x_time_np = x_signal[:seq_len].numpy()
+    #     _th_arc = (x_time_np[seq_len - 1] - np.mean(x_time_np)) * 0.01
+    #     _cnt_arc_norm = np.sum(np.abs(x_time_np - np.mean(x_time_np)) < _th_arc) / seq_len
+    #     x_signal[0:16] = _cnt_arc_norm  # anti-pool op
+    #     coeffs = pywt.wavedec(x_time_np, wavelet, level=level)
+    #     wavelet_coefficients = torch.from_numpy(np.concatenate(coeffs))
+    #     if wavelet_coefficients.numel() < len(x_signal[seq_len:]):
+    #         x_signal[seq_len:seq_len + len(wavelet_coefficients)] = wavelet_coefficients
+    #         x_signal[seq_len + len(wavelet_coefficients):] = 0
+    #     else:
+    #         x_signal[seq_len:] = wavelet_coefficients[:len(x_signal) - seq_len]
+    #     x_signal = x_signal.unsqueeze(0)
+    #     return x_signal
 
     def dataset_generate(self, x, y=None):
         dataset = SignalDataset(x, y, transform=self.transform_sample, seq_len=self.seq_len)
@@ -164,10 +182,11 @@ class HDF5Dataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         x_sample = self.features[idx]
-        ones = np.ones(len(x_sample))
-        x_sample = np.concatenate((x_sample, ones))
+        # ones = np.ones(len(x_sample))
+        # x_sample = np.concatenate((x_sample, ones))
         y_sample = self.labels[idx]
-        x_signal = self.transform(x_sample, int(SAMPLE_RATE / 50))
+        # x_signal = self.transform(x_sample, int(SAMPLE_RATE / 50))
+        x_signal = self.transform(x_sample)
         y_tensor = torch.tensor(y_sample, dtype=torch.float32).view(-1)
         return x_signal, y_tensor
 
@@ -183,5 +202,6 @@ class InferenceDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         x_sample = self.x[idx]
-        x_signal = self.transform(x_sample, self.seq_len)
+        # x_signal = self.transform(x_sample, self.seq_len)
+        x_signal = self.transform(x_sample)
         return x_signal
