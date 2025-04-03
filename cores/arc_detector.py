@@ -88,7 +88,10 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v14 - [v13] + pos2s/afdd_models_mp_r0/best_e494_b0.9374.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v15 - [v14] + data_v13/afdd_models_mp_r1/best_e506_b0.9398.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/v17 - [v16] + data_v15/afdd_models_mp_r0+/best_e193_b0.9313.pt'):
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e245_b0.9699.pt'):
+    # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/models_lite/v19 - lite model v0/afdd_models_mp_r0/best_e245_b0.9699.pt'):
+    # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/models_lite/v19 - lite model v0/afdd_models_mp_r0/best_e313_b0.9743.pt'):
+    # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v5/best_e323_b0.9766.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e262_b0.9761.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -239,6 +242,32 @@ class ArcDetector:
                 self.peak_eval_win[peak_candidate_idx] > peak_th:
             self.peak_eval_win.clear()
             return peak_candidate_idx
+        return -1
+
+    def _detect_peak_or_valley(self, cur_val, win_size=256, peak_th=0, valley_th=0, reset=False):
+        if reset:
+            self.peak_eval_win.clear()
+            return -1
+
+        self.peak_eval_win.append(cur_val)
+        self.peak_eval_win = self.peak_eval_win[-win_size:]
+
+        if len(self.peak_eval_win) < win_size:
+            return -1
+
+        peak_candidate_idx = win_size // 2
+        peak_candidate_val = self.peak_eval_win[peak_candidate_idx]
+
+        # Check for peak
+        if peak_candidate_val == max(self.peak_eval_win) and peak_candidate_val > peak_th:
+            self.peak_eval_win.clear()
+            return peak_candidate_idx
+
+        # Check for valley
+        if peak_candidate_val == min(self.peak_eval_win) and peak_candidate_val < valley_th:
+            self.peak_eval_win.clear()
+            return peak_candidate_idx
+
         return -1
 
     def _svm_infer(self, seq, suffix='', path_label='./rtsvm', dir_libsvm='/home/manu/nfs/libsvm'):
@@ -449,7 +478,7 @@ class ArcDetector:
         return max_similarity, best_match
 
     def infer_v3(self, feat_sample=False):
-        _alarm_arc_cnt_th = 3
+        _alarm_arc_cnt_th = 4
         _min_val_th = self.indicator_max_val / 2 * 0.05  # MIN_VAL_TH * 2
         _th_raw = 2048 * 1.0
         _ini_peak_cnt_th = 64
@@ -531,12 +560,15 @@ class ArcDetector:
         self.db.db['rt'].seq_peak_mean[-1] = self.peak_mean * _scale_peak_mean if self.peak_mean > 0 else 0
         peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size,
                                           peak_th=self.power_mean + _min_val_th)
+        # peak_idx_norm = self._detect_peak_or_valley(power_pick, win_size=self.peak_eval_win_size,
+        #                                             peak_th=self.power_mean + _min_val_th,
+        #                                             valley_th=self.power_mean - _min_val_th)
         peak_idx = self.db.db['rt'].seq_len - self.peak_eval_win_size // 2 if peak_idx_norm > 0 else -1
         _peak_suppose_idx = int(self.peak_anchor_idx + self.peak_interval_pred) if self.peak_interval_pred > 0 else -1
         if _peak_suppose_idx > 0 and _peak_suppose_idx < self.db.db['rt'].seq_len:
             self.db.db['rt'].info_eval_peaks.append(_peak_suppose_idx)
             self.peak_anchor_idx = _peak_suppose_idx
-        if peak_idx < 0 or peak_idx - self.last_peak_idx < self.af_win_size // 2:  # seq filter
+        if peak_idx < 0 or peak_idx - self.last_peak_idx < self.af_win_size // 1.5:  # seq filter
             self.alarm_overload_cnt = self.alarm_overload_cnt - 0.0001 if self.alarm_overload_cnt > 0 else self.alarm_overload_cnt
             self.alarm_lower_cnt = self.alarm_lower_cnt - 0.0001 if self.alarm_lower_cnt > 0 else self.alarm_lower_cnt
             self.alarm_arc_cnt = self.alarm_arc_cnt - 0.0001 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt
@@ -628,12 +660,12 @@ class ArcDetector:
 
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt
         # self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc and _is_alarm_overload else self.alarm_arc_cnt
-        if (self.af_win_size * 1.5 < peak_idx - self.last_peak_idx < self.af_win_size * 3
-                and self.ini_peak_cnt > _ini_peak_cnt_th and self.alarm_arc_cnt > 0.5):
+        if (self.af_win_size * 1.5 < peak_idx - self.last_peak_idx < self.af_win_size * 8
+                and self.alarm_arc_cnt > 0.5 and _peak_val > self.indicator_max_val):
             self.alarm_arc_cnt += (peak_idx - self.last_peak_idx) / self.af_win_size
             # logging.info(f'padding [{peak_idx}] self.alarm_arc_cnt -- > {self.alarm_arc_cnt}')
             self.db.db['rt'].seq_state_gt_normal[self.last_peak_idx:peak_idx] = \
-                [self.indicator_max_val / 4] * (peak_idx - self.last_peak_idx)
+                [self.indicator_max_val / 8] * (peak_idx - self.last_peak_idx)
 
         # self.alarm_arc_cnt += _score
         # self.alarm_arc_descend_peak_cnt = self.alarm_arc_descend_peak_cnt + 1 if _delta_peak < 0 else 0
@@ -719,8 +751,9 @@ class ArcDetector:
             self._peaks_sample(peak_idx)
         elif not pos_only:
             _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
-            _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
-            _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
+            # _seq_pick_hf = np.array(self.db.db['rt'].seq_hf[peak_idx - self.af_win_size:peak_idx]).astype(float)
+            # _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
+            _seq_pick = _seq_pick_power
             _seq_pick_ex = _seq_pick[np.newaxis, :]
             _score = self.classifier.infer(_seq_pick_ex, batch_size=1)[0]
             if self.db.db['rt'].seq_power[

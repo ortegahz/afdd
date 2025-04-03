@@ -51,7 +51,7 @@ class ClassifierCNN(ClassifierBase):
             # self._load_checkpoint_v1(ckpt)
         if ddp:
             self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
-        self.criterion = FocalLossV0().to(self.local_rank)
+        self.criterion = HardExampleMiningFocalLoss().to(self.local_rank)
         self.features_generator = FeaturesGeneratorCNN()
         self.rank = args.rank if not is_infer else 0
         self.save_dir = args.save_dir if not is_infer else None

@@ -19,7 +19,23 @@ class FeaturesGeneratorXGB(FeaturesGeneratorBase):
     def __init__(self):
         super().__init__()
         self.feature_names = None
-        self.feature_methods = [self._features_dummy_generate]
+        self.feature_methods = [self._features_fft_generate_v1]
+
+    @staticmethod
+    def _features_fft_generate_v1(data, sample_rate=SAMPLE_RATE):
+        # Convert data to a NumPy array and trim it to cover one period of 50 Hz
+        data_array = np.array(data[:, :int(sample_rate / 50)])
+        fft_values = np.fft.fft(data_array)
+        fft_magnitude = np.abs(fft_values)
+        # Calculate corresponding frequencies, taking only positive frequencies
+        freqs = np.fft.fftfreq(data_array.shape[1], d=1 / sample_rate)
+        positive_freqs = freqs[:data_array.shape[1] // 2]
+        fft_magnitude = fft_magnitude[:, :positive_freqs.size]  # Only positive part of the spectrum
+        # The features are simply the magnitudes of these frequencies
+        features = fft_magnitude
+        # Generate feature names for each frequency bin
+        feature_names = [f'fft_magnitude_{freq:.2f}Hz' for freq in positive_freqs]
+        return features, feature_names
 
     @staticmethod
     def _features_fft_generate(data, num_intervals=64):
@@ -109,15 +125,33 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
     #     return x_signal
 
     # @staticmethod
-    # def transform_sample(x_sample, seq_len):
+    # def transform_sample(x_sample):
+    #     seq_len = len(x_sample)
+    #     # Convert to tensor and normalize the first part of the signal
     #     x_tensor = torch.tensor(x_sample, dtype=torch.float32)
-    #     x_signal = x_tensor.clone()
-    #     x_signal[:seq_len] = (x_signal[:seq_len] - 2048) / 4096
-    #     fft_values = torch.fft.fft(x_signal[:seq_len])
+    #     x_signal = (x_tensor[:seq_len] - 2048) / 4096
+    #
+    #     # Perform FFT and get the magnitudes
+    #     fft_values = torch.fft.fft(x_signal)
     #     fft_magnitude = torch.abs(fft_values)
-    #     x_signal[seq_len:] = fft_magnitude
-    #     x_signal = x_signal.unsqueeze(0)
-    #     return x_signal
+    #
+    #     # Use high-frequency components from the positive frequencies
+    #     half_point = seq_len // 2
+    #     quarter_point = seq_len // 4
+    #     high_freq_component = fft_magnitude[quarter_point:half_point]
+    #
+    #     # Calculate padding necessary to make length a multiple of 32
+    #     current_length = high_freq_component.shape[0]
+    #     padding_required = (32 - (current_length % 32)) % 32
+    #     padding = (0, padding_required)  # (left_pad, right_pad)
+    #
+    #     # Pad the signal
+    #     high_freq_component = F.pad(high_freq_component, padding, "constant", 0)
+    #
+    #     # Reshape to add channel dimension for CNN input
+    #     high_freq_component = high_freq_component.unsqueeze(0)
+    #
+    #     return high_freq_component
 
     # @staticmethod
     # def transform_sample(x_sample, seq_len, wavelet='db4', level=3):

@@ -19,7 +19,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--load_dir', default='/dev/shm/afd_pm_hdf5')
     parser.add_argument('--save_dir', default='/home/Huangzhe/test/manu-pc/tmp/afdd_models_mp')
-    # parser.add_argument('--path_label_train', default='/home/Huangzhe/test/afd_pm_train')
+    parser.add_argument('--path_save', default='/home/manu/tmp/xgb.pt')
+    parser.add_argument('--path_label_train', default='/home/manu/tmp/afd_pm_train')
     # parser.add_argument('--path_label_test', default='/home/Huangzhe/test/afd_pm_test')
     parser.add_argument('--path_ckpt', default=None)
     parser.add_argument('--local_rank', type=int, default=0, help='Local rank for distributed training')
@@ -28,12 +29,12 @@ def parse_args():
 
 def run_xgb(args):
     logging.info(args)
-    X, y = svm_label2data_v1(args.path_label)
+    X, y = svm_label2data_v1(args.path_label_train, lidx=4096 * 32)
     y[y < 0] = 0
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=33)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=64)
     num_pos = np.sum(y_train == 1)
     num_neg = np.sum(y_train == 0)
-    scale_pos_weight = num_neg / num_pos * 0.3
+    scale_pos_weight = num_neg / num_pos
     # scale_pos_weight = 16
     params = {
         'max_depth': 3,
@@ -107,6 +108,7 @@ def main_worker(rank, world_size, args):
 def main():
     set_logging()
     args = parse_args()
+
     # run_xgb(args)
     # run_cnn(args)
 

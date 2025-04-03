@@ -310,7 +310,7 @@ class DataRT(DataBase):
                          arrowprops=dict(arrowstyle="->", color='black'))
         plt.xticks(np.arange(0, seq_len, SAMPLE_RATE / 50))
         plt.xlim(0, seq_len)
-        plt.ylim(0, 4096 * 2)
+        plt.ylim(-1024, 4096 * 2)
         plt.legend()
         plt.subplot(self.wavelet_max_level + 1, 1, 2)
         plt.plot(time_stamps, np.array(seq_filtered).astype(float), label='seq_filtered')

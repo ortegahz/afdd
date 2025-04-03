@@ -35,7 +35,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
         db_offline_single = self.db_offline.db[key]
         # for idx in range(0, db_offline_single.len, self.arc_detector.sub_sample_rate):
         for idx in range(0, db_offline_single.len):
-            # if idx < 0.0 * 1e6 or idx > 0.1 * 1e6:
+            # if idx < 3.2 * 1e6 or idx > 3.4 * 1e6:
             #     continue
             cur_power = db_offline_single.seq_power[idx]
             cur_hf = db_offline_single.seq_hf[idx]
@@ -192,7 +192,7 @@ class DetectorWrapperV3NPY(DetectorWrapperV2):
         _cnt = 0
         cases_path = glob.glob(os.path.join(self.addr, '**', '*.npy'), recursive=True)
         for i, case_path in enumerate(cases_path):
-            # if _cnt <= 8:
+            # if _cnt <= 16:
             #     _cnt += 1
             #     continue
             # _feat_sample = True if _cnt == 0 else False
