@@ -267,6 +267,19 @@ class DataRT(DataBase):
         self.db['rt'].seq_wt_power_pioneer.append([0] * self.wavelet_max_level)
         self.db['rt'].seq_len += 1
 
+    def save(self, dir_save='/home/manu/tmp'):
+        KEY = 'rt'
+        _path_save = os.path.join(dir_save, 'seq_power.txt')
+        np.savetxt(_path_save, self.db[KEY].seq_power, fmt='%f', delimiter='\n')
+        _path_save = os.path.join(dir_save, 'seq_state_pred_classifier.txt')
+        np.savetxt(_path_save, self.db[KEY].seq_state_pred_classifier, fmt='%f', delimiter='\n')
+        _path_save = os.path.join(dir_save, 'seq_state_pred_arc.txt')
+        np.savetxt(_path_save, self.db[KEY].seq_state_pred_arc, fmt='%f', delimiter='\n')
+        _path_save = os.path.join(dir_save, 'seq_state_gt_normal.txt')
+        np.savetxt(_path_save, self.db[KEY].seq_state_gt_normal, fmt='%f', delimiter='\n')
+        _path_save = os.path.join(dir_save, 'seq_state_pred_idle.txt')
+        np.savetxt(_path_save, self.db[KEY].seq_state_pred_idle, fmt='%f', delimiter='\n')
+
     def plot(self, pause_time_s=1024, dir_save=None, save_name=None, show=True):
         plt.ion()
         key = 'rt'

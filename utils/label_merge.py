@@ -40,11 +40,16 @@ def parse_args():
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v13/data_pick/自主设计实验正例/afd',
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v13/data_pick/自主设计实验负例/afd',
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v14/data_pick/neg/afd',
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v15/data_pick/neg/afd',  # new
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v15/data_pick/neg/afd',
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v16/data_pick/pos/afd',
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v16/data_pick/neg/afd',  # new
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v18/data_pick/neg/afd',  # new
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v18/data_pick/pos/afd',  # new
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v16/data_pick/neg/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v18/data_pick/neg/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v18/data_pick/pos/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v20/data_pick/pos/afd',  # new
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v20/data_pick/neg/afd',  # new
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v21/data_pick/neg/afd',  # new
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v21/data_pick/pos/afd',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v22/data_pick/neg/afd',  # new
                         ])
     parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_train')
     # parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_test')

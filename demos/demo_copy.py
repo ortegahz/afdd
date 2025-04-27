@@ -32,15 +32,15 @@ def parse_args():
     # parser.add_argument('--addr', default='/media/manu/data/afdd/data/data_v2/subsample/')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV2NPY')
     # parser.add_argument('--db_key', default=None)
-    # parser.add_argument('--addr',
-    #                     default='/media/manu/ST8000DM004-2U91/afdd/data/data_v23/data_sorted/负载抑制/负载抑制性试验1（定频空调）+1000W阻性负载.npy')
-    # parser.add_argument('--dtr_type', default='DetectorWrapperV0')
-    # parser.add_argument('--db_key', default='default')
-    parser.add_argument('--addr', default='/media/manu/ST8000DM004-2U91/afdd/data/data_v24/data_sorted/自主负例/')
-    parser.add_argument('--dtr_type', default='DetectorWrapperV3NPY')
-    parser.add_argument('--db_key', default=None)
+    parser.add_argument('--addr',
+                        default='/media/manu/ST8000DM004-2U91/afdd/data/data_v21/data_sorted/串联碳化/串联碳化4+0.7.npy')
+    parser.add_argument('--dtr_type', default='DetectorWrapperV0')
+    parser.add_argument('--db_key', default='default')
+    # parser.add_argument('--addr', default='/media/manu/ST8000DM004-2U91/afdd/data/data_v23/data_sorted/自主无线负例/')
+    # parser.add_argument('--dtr_type', default='DetectorWrapperV3NPY')
+    # parser.add_argument('--db_key', default=None)
     parser.add_argument('--dbo_type', default='DataV4')
-    parser.add_argument('--dir_plot_save', default='/home/manu/tmp/demo_arc_detector_save')
+    parser.add_argument('--dir_plot_save', default='/home/manu/tmp/demo_arc_detector_save_copy')
     return parser.parse_args()
 
 

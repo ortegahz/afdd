@@ -18,7 +18,7 @@ from utils.utils import set_logging, svm_label2data_v1
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--load_dir', default='/dev/shm/afd_pm_hdf5')
-    parser.add_argument('--save_dir', default='/home/Huangzhe/test/manu-pc/tmp/afdd_models_mp')
+    parser.add_argument('--save_dir', default='/home/Huangzhe/test/afdd_models_mp')
     parser.add_argument('--path_save', default='/home/manu/tmp/xgb.pt')
     parser.add_argument('--path_label_train', default='/home/manu/tmp/afd_pm_train')
     # parser.add_argument('--path_label_test', default='/home/Huangzhe/test/afd_pm_test')
