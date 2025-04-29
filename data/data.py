@@ -1,6 +1,7 @@
 import glob
 import logging
 import os
+import struct
 from dataclasses import dataclass, field
 
 import matplotlib.pyplot as plt
@@ -218,6 +219,59 @@ class DataV4(DataV3):
             self.db[_key].seq_state_arc[idx_s:idx_e] = STATE_INDICATE_VAL
 
 
+class DataV5(DataV4):
+    def __init__(self, addr):
+        super().__init__(addr)
+
+    def parse_bin(self):
+        record_format = 'H'  # uint16_t
+        record_size = struct.calcsize(record_format)
+        count = 0
+        data_list = []
+        with open(self.path_in, 'rb') as file:
+            while True:
+                count += 1
+                record_data = file.read(record_size)
+                if not record_data:
+                    break  # EOF
+                value = struct.unpack(record_format, record_data)[0]
+                if value & 0x0F:
+                    value = -1
+                else:
+                    value >>= 4
+                data_list.append(value)
+        return np.array(data_list)
+
+    def load(self):
+        _key = 'default'
+        _npy = self.parse_bin()
+        logging.info(_npy)
+        _real_value = _npy
+        # # _npy = _npy * 2048 / 40 + 2048
+        # _voltage = _npy / 4096 * 3.3
+        # logging.info(_voltage)
+        # # _real_value = _voltage * 2000. / 51.
+        # # logging.info(_real_value)
+        # _real_value = _voltage * 1000. / 3.
+        # logging.info(_real_value)
+        logging.info((max(_real_value), min(_real_value)))
+        self.db[_key].seq_power = _real_value.tolist()
+        self.db[_key].len = len(self.db['default'].seq_power)
+        self.db[_key].seq_hf = np.array([1] * self.db[_key].len)
+        self.db[_key].seq_state_arc = np.array([0] * self.db[_key].len)
+        self.db[_key].seq_state_normal = np.array([0] * self.db[_key].len)
+
+        _file_label = self.path_in.replace('.bin', '.txt')
+        if not os.path.exists(_file_label):
+            return
+        with open(_file_label, 'r') as f:
+            _lines = f.readlines()
+        for _line in _lines:
+            idx_s, idx_e = _line.strip().split(' ')
+            idx_s, idx_e = max(int(idx_s), 0), min(int(idx_e), self.db[_key].len)
+            self.db[_key].seq_state_arc[idx_s:idx_e] = STATE_INDICATE_VAL
+
+
 class DataRT(DataBase):
     @dataclass
     class Signals:
@@ -303,17 +357,17 @@ class DataRT(DataBase):
         time_stamps = np.array(range(seq_len))
         plt.subplot(self.wavelet_max_level + 1, 1, 1)
         plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
-        plt.plot(time_stamps, np.array(seq_state_pred_balcony).astype(float), label='seq_state_pred_balcony')
-        plt.plot(time_stamps, np.array(seq_state_pred_classifier).astype(float), label='seq_state_pred_classifier')
-        plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred', color='red')
-        plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
-        plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
-        # plt.plot(time_stamps, np.array(seq_power_mean).astype(float), label='power_mean')
-        plt.plot(time_stamps, np.array(seq_peak_mean).astype(float), label='seq_peak_mean')
-        plt.plot(info_pred_peaks, np.array(seq_power).astype(float)[info_pred_peaks], 'x', label='peaks')
-        # plt.plot(info_eval_peaks, np.array(seq_power).astype(float)[info_eval_peaks], 'o', label='peaks_e')
-        plt.plot(time_stamps, np.array(seq_state_pred_idle).astype(float), label='state_idle_pred')
-        # plt.plot(time_stamps, np.array(seq_state_pred_icr).astype(float), label='seq_state_pred_icr')
+        # plt.plot(time_stamps, np.array(seq_state_pred_balcony).astype(float), label='seq_state_pred_balcony')
+        # plt.plot(time_stamps, np.array(seq_state_pred_classifier).astype(float), label='seq_state_pred_classifier')
+        # plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred', color='red')
+        # plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
+        # plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
+        # # plt.plot(time_stamps, np.array(seq_power_mean).astype(float), label='power_mean')
+        # plt.plot(time_stamps, np.array(seq_peak_mean).astype(float), label='seq_peak_mean')
+        # plt.plot(info_pred_peaks, np.array(seq_power).astype(float)[info_pred_peaks], 'x', label='peaks')
+        # # plt.plot(info_eval_peaks, np.array(seq_power).astype(float)[info_eval_peaks], 'o', label='peaks_e')
+        # plt.plot(time_stamps, np.array(seq_state_pred_idle).astype(float), label='state_idle_pred')
+        # # plt.plot(time_stamps, np.array(seq_state_pred_icr).astype(float), label='seq_state_pred_icr')
         for i, peak in enumerate(info_pred_peaks):
             plt.annotate(f'{info_af_scores[i]: .2f}',
                          (peak, seq_power[peak]),
@@ -323,7 +377,8 @@ class DataRT(DataBase):
                          arrowprops=dict(arrowstyle="->", color='black'))
         plt.xticks(np.arange(0, seq_len, SAMPLE_RATE / 50))
         plt.xlim(0, seq_len)
-        plt.ylim(-1024, 4096 * 2)
+        # plt.ylim(-1024, 4096 * 2)
+        plt.ylim(0, 4096)
         plt.legend()
         plt.subplot(self.wavelet_max_level + 1, 1, 2)
         plt.plot(time_stamps, np.array(seq_filtered).astype(float), label='seq_filtered')

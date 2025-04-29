@@ -4,3 +4,13 @@
 *.pyc
 
 tmp\.py
+/device/timer.o
+/device/timer.ko
+/device/modules.order
+/device/Module.symvers
+/device/.timer.o.cmd
+/device/.Module.symvers.cmd
+/device/.modules.order.cmd
+/device/.timer.ko.cmd
+/device/.timer.mod.cmd
+/device/.timer.mod.o.cmd
