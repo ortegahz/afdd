@@ -14,3 +14,6 @@ tmp\.py
 /device/.timer.ko.cmd
 /device/.timer.mod.cmd
 /device/.timer.mod.o.cmd
+/device/timer.mod
+/.vscode/settings.json
+/device/ad738x_reader

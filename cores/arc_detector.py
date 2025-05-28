@@ -42,7 +42,7 @@ class ArcDetector:
         self.arc_pred_win_s = -1
         self.arc_pred_win_e = -1
         self.peak_eval_win = list()
-        self.peak_eval_win_size = 64
+        self.peak_eval_win_size = 16  # 64 for 22k sample rate
         self.af_win_size = int(SAMPLE_RATE / 50)
         self.last_peak_idx = -1
         self.peak_anchor_idx = -1
@@ -53,8 +53,8 @@ class ArcDetector:
         self.filter_cutoff_freq = self.sample_rate_new * 0.4  # hz
         self.filter_order = 4
         # self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter()
-        self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter_lp()
-        self.filter_zi = self.filter_zi_org
+        # self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter_lp()
+        # self.filter_zi = self.filter_zi_org
         self.sample_win_size = self.sample_rate  # 1s
         self.sample_cnt = 1024
         self.samples_neg, self.samples_pos = list(), list()
@@ -91,7 +91,7 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/models_lite/v19 - lite model v0/afdd_models_mp_r0/best_e245_b0.9699.pt'):
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/models_lite/v19 - lite model v0/afdd_models_mp_r0/best_e313_b0.9743.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v5/best_e323_b0.9766.pt'):
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e222_b0.9780.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e0_b0.1035.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -154,7 +154,7 @@ class ArcDetector:
         self.filter_max, self.filter_th, self.filter_th_cnt = -1, -1, 0
         self.samples_neg.clear()
         self.samples_pos.clear()
-        self.filter_zi = self.filter_zi_org
+        # self.filter_zi = self.filter_zi_org
         self.db.reset()
 
     def _design_highpass_filter(self):
@@ -811,7 +811,8 @@ class ArcDetector:
             # _seq_pick = np.concatenate((_seq_pick_power, _seq_pick_hf), axis=0)
             _seq_pick = _seq_pick_power
             _seq_pick_ex = _seq_pick[np.newaxis, :]
-            _score = self.classifier.infer(_seq_pick_ex, batch_size=1)[0]
+            # _score = self.classifier.infer(_seq_pick_ex, batch_size=1)[0]
+            _score = 0.0
             if self.db.db['rt'].seq_power[
                 peak_idx] < self.indicator_max_val * ALARM_INDICATE_SCALE:  # ignore artificial noise
                 self.samples_neg.append(_seq_pick)  # sample all

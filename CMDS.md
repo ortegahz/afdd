@@ -27,3 +27,8 @@ torchrun --nproc_per_node=8 --master_addr=172.20.254.132 --master_port=29501 dem
 python demos/demo.py --dir_plot_save /home/manu/tmp/demo_arc_detector_save_single --dtr_type DetectorWrapperV0 --db_key default --addr "/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v21/data_sorted/自主正例/电钻最高速运行_0.npy"
 
 python demos/demo.py --dir_plot_save /home/manu/tmp/demo_arc_detector_save_debug --dtr_type DetectorWrapperV3NPY --db_key default --addr "/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v16/data_pick/pos/"
+
+# others
+dd if=/dev/ttyACM1 of=/home/manu/tmp/raw.bin bs=128K status=progress
+sudo stty -F /dev/ttyACM1 raw -echo -ixon -ixoff -crtscts
+dd if=/dev/ttyACM1 of=/dev/shm/raw.bin bs=1K count=1K iflag=fullblock status=progress

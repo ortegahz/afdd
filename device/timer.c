@@ -109,41 +109,42 @@ static const struct file_operations ad738x_fops = {
 static void ad738x_complete(void *arg)
 {
 	struct ad738x_data *d = arg;
-	u16 samples[2];
-	int ret;
-	int lost;
+	// u16 samples[2];
+	// int ret;
+	// int lost;
 
-	/*
-	 * 取出并清零丢帧计数；最大只需要 0‑15 ，超过则饱和成 15。
-	 * counter 的高 2 位写入电压样本 LSB，
-	 * 低 2 位写入电流样本 LSB。
-	 */
-	lost = atomic_xchg(&d->lost_cnt, 0);
-	if (lost > 15)
-		lost = 15;
+	// /*
+	//  * 取出并清零丢帧计数；最大只需要 0‑15 ，超过则饱和成 15。
+	//  * counter 的高 2 位写入电压样本 LSB，
+	//  * 低 2 位写入电流样本 LSB。
+	//  */
+	// lost = atomic_xchg(&d->lost_cnt, 0);
+	// if (lost > 15)
+	// 	lost = 15;
 
-	samples[0] = (d->rx[0] & ~0x3) | ((lost >> 2) & 0x3); /* 电压 */
-	samples[1] = (d->rx[1] & ~0x3) | (lost & 0x3);		  /* 电流 */
+	// samples[0] = (d->rx[0] & ~0x3) | ((lost >> 2) & 0x3); /* 电压 */
+	// samples[1] = (d->rx[1] & ~0x3) | (lost & 0x3);		  /* 电流 */
 
-	if (lost)
-	{
-		samples[0] = 0xFFFF;
-		samples[1] = 0xFFFF;
-	}
+	// if (lost)
+	// {
+	// 	samples[0] = 0xFFFF;
+	// 	samples[1] = 0xFFFF;
+	// }
 
-	/* 压入环形 FIFO，如满则丢掉最旧一帧 */
-	spin_lock(&d->fifo_lock);
-	while (kfifo_avail(&d->fifo) < FRAME_BYTES)
-	{
-		u16 dummy[2];
-		ret = kfifo_out(&d->fifo, dummy, FRAME_BYTES);
-		(void)ret;
-	}
-	kfifo_in(&d->fifo, samples, FRAME_BYTES);
-	spin_unlock(&d->fifo_lock);
+	// /* 压入环形 FIFO，如满则丢掉最旧一帧 */
+	// spin_lock(&d->fifo_lock);
+	// while (kfifo_avail(&d->fifo) < FRAME_BYTES)
+	// {
+	// 	u16 dummy[2];
+	// 	ret = kfifo_out(&d->fifo, dummy, FRAME_BYTES);
+	// 	(void)ret;
+	// }
+	// kfifo_in(&d->fifo, samples, FRAME_BYTES);
+	// spin_unlock(&d->fifo_lock);
 
-	wake_up_interruptible(&d->read_wait);
+	// wake_up_interruptible(&d->read_wait);
 	gpio_set_value(TARGET_GPIO, 0);
+
 	atomic_set(&d->busy, 0);
 }
 
@@ -151,23 +152,33 @@ static void ad738x_complete(void *arg)
 static enum hrtimer_restart timer_cb(struct hrtimer *t)
 {
 	struct ad738x_data *d = container_of(t, struct ad738x_data, timer);
+	// static bool flag = true;
+
+	gpio_set_value(TARGET_GPIO, 1);
 
 	if (atomic_read(&d->busy))
 	{
-		/* SPI 仍在忙，认为这一周期“丢失” */
-		if (atomic_read(&d->lost_cnt) < 15)
-			atomic_inc(&d->lost_cnt); /* 最多累积到 15           */
+		// /* SPI 仍在忙，认为这一周期“丢失” */
+		// if (atomic_read(&d->lost_cnt) < 15)
+		// 	atomic_inc(&d->lost_cnt); /* 最多累积到 15           */
 		goto out;
 	}
 
 	atomic_set(&d->busy, 1);
-	gpio_set_value(TARGET_GPIO, 1); /* 触发转换 */
+	// gpio_set_value(TARGET_GPIO, (int)flag); /* 触发转换 */
+	// flag = !flag;
 
-	if (spi_async(d->spi, &d->msg))
-	{
-		atomic_set(&d->busy, 0);
-		gpio_set_value(TARGET_GPIO, 0);
-	}
+	spi_async(d->spi, &d->msg);
+
+	// if (spi_async(d->spi, &d->msg))
+	// {
+	// 	atomic_set(&d->busy, 0);
+	// 	gpio_set_value(TARGET_GPIO, 0);
+	// }
+
+	// gpio_set_value(TARGET_GPIO, 1);
+	// spi_async(d->spi, &d->msg);
+	// gpio_set_value(TARGET_GPIO, 0);
 
 out:
 	hrtimer_forward_now(t, d->period);
@@ -229,7 +240,7 @@ static int ad738x_probe(struct spi_device *spi)
 
 	/* 其它成员 */
 	d->spi = spi;
-	d->period = ktime_set(0, 500000); /* ≈22.3 kHz */
+	d->period = ktime_set(0, 100000); /* ≈22.3 kHz */
 	atomic_set(&d->busy, 0);
 	atomic_set(&d->lost_cnt, 0);
 

@@ -40,10 +40,15 @@ def parse_args():
     # parser.add_argument('--dtr_type', default='DetectorWrapperV3NPY')
     # parser.add_argument('--db_key', default=None)
     # parser.add_argument('--dbo_type', default='DataV4')
-    parser.add_argument('--addr', default='/home/manu/nfs/v_0.bin')
+    parser.add_argument('--addr',
+                        default='/media/manu/ST8000DM004-2U91/afdd/data/data_v26/data_sorted/串联碳化/串联碳化4+1.bin')
     parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     parser.add_argument('--db_key', default='default')
     parser.add_argument('--dbo_type', default='DataV5')
+    # parser.add_argument('--addr', default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v25/data_sorted/自主负例/')
+    # parser.add_argument('--dtr_type', default='DetectorWrapperV3BIN')
+    # parser.add_argument('--db_key', default=None)
+    # parser.add_argument('--dbo_type', default='DataV5')
     parser.add_argument('--dir_plot_save', default='/home/manu/tmp/demo_arc_detector_save')
     return parser.parse_args()
 
