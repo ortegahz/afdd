@@ -60,6 +60,26 @@ def svm_label2data_v1(path_label, lidx=-1):
     return np.array(x).astype(np.float32), np.array(y).astype(np.int64)
 
 
+def svm_label2data_v2(path_label, lidx=-1):
+    X, y = [], []
+
+    with open(path_label, 'r') as f:
+        for i, line in enumerate(f):  # ❶ iterate line-by-line
+            if 0 < lidx < i:  # ❷ optional early stop
+                break
+            parts = line.rstrip('\n').split(',')
+            y.append(int(parts[0]))  # ❸ label
+            X.append([float(p) for p in parts[1:]])  # ❹ features
+
+    X = np.asarray(X, dtype=np.float32)
+    y = np.asarray(y, dtype=np.int64)
+    X = np.concatenate([X, np.zeros((X.shape[0], 2), dtype=np.float32)], axis=1)  # (bs, 448)
+    X = X[:, None, None, :]
+    y[y < 0] = 0
+
+    return X, y
+
+
 def feature_engineering(data):
     data_array = np.array(data)
     fft_values = np.fft.fft(data_array)

@@ -24,6 +24,7 @@ def parse_args():
     # parser.add_argument('--path_label_test', default='/home/Huangzhe/test/afd_pm_test')
     parser.add_argument('--path_ckpt', default=None)
     parser.add_argument('--local_rank', type=int, default=0, help='Local rank for distributed training')
+    parser.add_argument('--qat', default=False, help='enable quant-aware training')
     return parser.parse_args()
 
 

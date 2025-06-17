@@ -272,6 +272,47 @@ class DataV5(DataV4):
             self.db[_key].seq_state_arc[idx_s:idx_e] = STATE_INDICATE_VAL
 
 
+class DataV6(DataV4):
+    def __init__(self, addr):
+        super().__init__(addr)
+
+    def parse_bin(self):
+        """
+        读取文件 -> 返回 (ch_a, ch_b) 两个 numpy.uint16 数组
+        """
+        # 直接用 numpy.fromfile，效率比 struct 循环高几个量级
+        raw = np.fromfile(self.path_in, dtype='<u2')  # < 表示 little-endian
+        if raw.size % 2:  # 如果是奇数个 16 bit 数据
+            raw = raw[:-1]  # 去掉最后那一个残缺采样
+
+        raw &= 0x0FFF
+
+        ch_a = raw[0::2]  # 偶数索引 = 通道 A（或“odd_array”）
+        ch_b = raw[1::2]  # 奇数索引 = 通道 B（或“even_array”）
+        return ch_a, ch_b
+
+    def load(self):
+        _key = 'default'
+
+        ch_a, ch_b = self.parse_bin()  # 解析得到两路
+        # =========== 根据实际情况挑一条或者两条写入 db ===========
+        self.db[_key].seq_power = ch_a.tolist()  # 例如把 A 通道当成功率
+        self.db[_key].len = len(ch_a)
+        self.db[_key].seq_hf = np.array([1] * self.db[_key].len)
+        self.db[_key].seq_state_arc = np.array([0] * self.db[_key].len)
+        self.db[_key].seq_state_normal = np.array([0] * self.db[_key].len)
+
+        _file_label = self.path_in.replace('.bin', '.txt')
+        if not os.path.exists(_file_label):
+            return
+        with open(_file_label, 'r') as f:
+            _lines = f.readlines()
+        for _line in _lines:
+            idx_s, idx_e = _line.strip().split(' ')
+            idx_s, idx_e = max(int(idx_s), 0), min(int(idx_e), self.db[_key].len)
+            self.db[_key].seq_state_arc[idx_s:idx_e] = STATE_INDICATE_VAL
+
+
 class DataRT(DataBase):
     @dataclass
     class Signals:
@@ -323,8 +364,9 @@ class DataRT(DataBase):
 
     def save(self, dir_save='/home/manu/tmp'):
         KEY = 'rt'
+        logging.info(f"self.db[KEY].seq_len --> {self.db[KEY].seq_len}")
         _path_save = os.path.join(dir_save, 'seq_power.txt')
-        np.savetxt(_path_save, self.db[KEY].seq_power, fmt='%f', delimiter='\n')
+        np.savetxt(_path_save, self.db[KEY].seq_power, fmt='%.6f', newline=',')
         _path_save = os.path.join(dir_save, 'seq_state_pred_classifier.txt')
         np.savetxt(_path_save, self.db[KEY].seq_state_pred_classifier, fmt='%f', delimiter='\n')
         _path_save = os.path.join(dir_save, 'seq_state_pred_arc.txt')
@@ -363,12 +405,13 @@ class DataRT(DataBase):
         plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
         # plt.plot(time_stamps, np.array(seq_power_mean).astype(float), label='power_mean')
-        plt.plot(time_stamps, np.array(seq_peak_mean).astype(float), label='seq_peak_mean')
+        # plt.plot(time_stamps, np.array(seq_peak_mean).astype(float), label='seq_peak_mean')
         plt.plot(info_pred_peaks, np.array(seq_power).astype(float)[info_pred_peaks], 'x', label='peaks')
         # plt.plot(info_eval_peaks, np.array(seq_power).astype(float)[info_eval_peaks], 'o', label='peaks_e')
         plt.plot(time_stamps, np.array(seq_state_pred_idle).astype(float), label='state_idle_pred')
         # plt.plot(time_stamps, np.array(seq_state_pred_icr).astype(float), label='seq_state_pred_icr')
         for i, peak in enumerate(info_pred_peaks):
+            # logging.info((peak, seq_power[peak], seq_power_mean[peak] + 2048 * 0.05))
             plt.annotate(f'{info_af_scores[i]: .2f}',
                          (peak, seq_power[peak]),
                          textcoords="offset points",

@@ -28,7 +28,16 @@ python demos/demo.py --dir_plot_save /home/manu/tmp/demo_arc_detector_save_singl
 
 python demos/demo.py --dir_plot_save /home/manu/tmp/demo_arc_detector_save_debug --dtr_type DetectorWrapperV3NPY --db_key default --addr "/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v16/data_pick/pos/"
 
+python demos/demo.py --dir_plot_save /home/manu/tmp/demo_arc_detector_save_debug --dtr_type DetectorWrapperV0 --db_key default --dbo_type DataV6 --addr "/home/manu/tmp/bins_out/正例-串联碳化-额定+1_20k.bin"
+
 # others
 dd if=/dev/ttyACM1 of=/home/manu/tmp/raw.bin bs=128K status=progress
 sudo stty -F /dev/ttyACM1 raw -echo -ixon -ixoff -crtscts
 dd if=/dev/ttyACM1 of=/dev/shm/raw.bin bs=1K count=1K iflag=fullblock status=progress
+INFO:root:best val_accuracy -> 0.9732620320855615
+INFO:root:best val_accuracy -> 0.9732620320855615
+
+# onnx
+python -m onnxruntime.quantization.preprocess \
+       --input  /home/manu/tmp/afdd_e447.onnx \
+       --output /home/manu/tmp/afdd_e447_pre.onnx

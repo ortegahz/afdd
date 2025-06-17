@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # 指定要解析的文件名
-# FILENAME = "/home/manu/tmp/20250526-173106.bin"
-FILENAME = "/media/manu/ST8000DM004-2U91/afdd/data/data_v26/data_sorted/串联碳化/串联碳化4+1.bin"
+FILENAME = "/media/manu/ST8000DM004-2U91/afdd/data/data_v30/6.11故障电弧测试数据/自主设计/探测器和电弧发生装置距离200米/反例-多负载运行（冰箱+电磁炉+日光灯+电钻+吸尘器最大转速），随机启停一种负载.bin"
+# FILENAME = "/home/manu/tmp/bins_out/国标/国标正例串联碳化-4+1_20k.bin"
 N_BIT_VALID = 12
 
 

@@ -45,11 +45,32 @@ def parse_args():
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v16/data_pick/neg/afd',
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v18/data_pick/neg/afd',
                             '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v18/data_pick/pos/afd',
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v20/data_pick/pos/afd',  # new
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v20/data_pick/neg/afd',  # new
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v21/data_pick/neg/afd',  # new
-                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v21/data_pick/pos/afd',  # new
-                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v22/data_pick/neg/afd',  # new
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v20/data_pick/pos/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v20/data_pick/neg/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v21/data_pick/neg/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v21/data_pick/pos/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v22/data_pick/neg/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v26/data_sorted - o/自主正例 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v26/data_sorted - o/自主负例 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v26/data_sorted - o/误动作 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v26/data_sorted - o/负载抑制 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v26/data_sorted - o/串联碳化 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v26/data_sorted - o/并联碳化 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v26/data_sorted - o/并联金属 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v27/data_sorted/并联金属 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v27/data_sorted/并联碳化 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v27/data_sorted/串联碳化 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v27/data_sorted/负载抑制 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v27/data_sorted/误动作 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v27/data_sorted/自主反例 - o/afd',
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v27/data_sorted/自主正例 - o/afd',
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v28/data_sorted/串联碳化 - o/afd',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v28/data_pick/pos/afd',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v28/data_pick/neg/afd',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v29/data_sorted/串联碳化 - o/afd',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v29/data_pick/pos/afd',  # new
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v29/data_pick/neg/afd',  # new
+                            '/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v29/data_sorted/并联金属 - o/afd',  # new
                         ])
     parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_train')
     # parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_test')

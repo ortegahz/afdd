@@ -33,7 +33,7 @@ def parse_args():
     # parser.add_argument('--dtr_type', default='DetectorWrapperV2NPY')
     # parser.add_argument('--db_key', default=None)
     # parser.add_argument('--addr',
-    #                     default='/media/manu/ST8000DM004-2U91/afdd/data/data_v23/data_sorted/负载抑制/负载抑制性试验1（定频空调）+1000W阻性负载.npy')
+    #                     default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v15/data_sorted/并联金属实验/并联金属性接触电弧3+0.7.npy')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     # parser.add_argument('--db_key', default='default')
     # parser.add_argument('--addr', default='/media/manu/ST8000DM004-2U91/afdd/data/data_v24/data_sorted/自主负例/')
@@ -41,14 +41,13 @@ def parse_args():
     # parser.add_argument('--db_key', default=None)
     # parser.add_argument('--dbo_type', default='DataV4')
     parser.add_argument('--addr',
-                        default='/media/manu/ST8000DM004-2U91/afdd/data/data_v26/data_sorted/串联碳化/串联碳化4+1.bin')
+                        default='/media/manu/ST8000DM004-2U91/afdd/data/data_v30/data_sorted/自主反例二百米/反例-多负载运行（冰箱+电磁炉+日光灯+电钻+吸尘器最大转速），随机启停一种负载_20k.bin')
     parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     parser.add_argument('--db_key', default='default')
-    parser.add_argument('--dbo_type', default='DataV5')
-    # parser.add_argument('--addr', default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v25/data_sorted/自主负例/')
+    # parser.add_argument('--addr', default='/media/manu/ST8000DM004-2U91/afdd/data/data_v30/data_sorted/自主反例二百米/')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV3BIN')
     # parser.add_argument('--db_key', default=None)
-    # parser.add_argument('--dbo_type', default='DataV5')
+    parser.add_argument('--dbo_type', default='DataV6')
     parser.add_argument('--dir_plot_save', default='/home/manu/tmp/demo_arc_detector_save')
     return parser.parse_args()
 

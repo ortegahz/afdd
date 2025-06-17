@@ -12,12 +12,15 @@ import numpy as np
 import serial
 
 # ---------------- 用户可调常量 ----------------
+# PAIR_BYTES = 4  # 16-bit V + 16-bit I
+# LEN = 1000 * 1000
+PAIR_BYTES = 8  # 16-bit V * 4
+LEN = 20 * 1000
 PORT = '/dev/ttyACM0'
 BAUDRATE = 115200 * 32  # 板端 CDC-ACM 固件的实际速率
 USE_RTSCTS = False  # 如固件支持，可改 True
 BLOCK = 128 * 1024  # 每次 readinto 尝试读取字节数
-PAIR_BYTES = 4  # 16-bit V + 16-bit I
-TARGET_SZ = PAIR_BYTES * 1024 * 1024  # 目标采样原始字节数
+TARGET_SZ = PAIR_BYTES * LEN  # 目标采样原始字节数
 N_BIT_VALID = 12  # 有效 ADC 位宽
 
 
@@ -67,12 +70,12 @@ def main() -> None:
     mv_pairs = mv[:full_pairs * PAIR_BYTES]
 
     raw16 = np.frombuffer(mv_pairs, dtype='<u2')
-    voltage = raw16[1::2]  # V 在偶数索引 or 奇数索引请按实际调整
-    current = raw16[::2]
+    voltage = raw16[1::int(PAIR_BYTES / 2)]  # V 在偶数索引 or 奇数索引请按实际调整
+    # current = raw16[::2]
 
     # 只画前 1 Msamples（可视化需要）
-    # n_plot = min(1_000_000, voltage.size)
-    n_plot = int(1_000_000 / 50)
+    n_plot = voltage.size
+    # n_plot = int(LEN / 50)
     x = np.arange(n_plot)
 
     plt.figure(figsize=(10, 4))

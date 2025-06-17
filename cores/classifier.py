@@ -3,9 +3,12 @@ import os
 import time
 
 import numpy as np
+import onnxruntime as ort
 import torch.optim as optim
 import xgboost as xgb
 from sklearn.metrics import f1_score
+from torch.ao.quantization import get_default_qat_qconfig, QConfigMapping
+from torch.ao.quantization.quantize_fx import fuse_fx, prepare_qat_fx, convert_fx
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 
@@ -39,10 +42,23 @@ class ClassifierXGB(ClassifierBase):
 class ClassifierCNN(ClassifierBase):
     def __init__(self, args, ddp=False, is_infer=False):
         super().__init__()
+        self.qat = args.qat if not is_infer else False
         self.local_rank = args.rank if not is_infer else 0
         self.num_epochs = 512
         self.lr = 1e-4
-        self.model = NetAFD().to(self.local_rank)
+        float_model = NetAFD().to(self.local_rank)
+        if self.qat and not is_infer:
+            float_model.eval()
+            example_inputs = (torch.randn(1, 1, 1, 448).to(self.local_rank),)
+            # fused_model = fuse_fx(float_model, example_inputs)
+            fused_model = fuse_fx(float_model)
+            qconfig = get_default_qat_qconfig('qnnpack')  # arm
+            qconfig_mapping = QConfigMapping().set_global(qconfig)
+            self.model = prepare_qat_fx(fused_model, qconfig_mapping, example_inputs).to(self.local_rank)
+            self.model.train()
+        else:
+            self.model = float_model  # 普通浮点训练 / 推理
+
         self.optimizer = optim.Adam(self.model.parameters(), self.lr)
         if is_infer:
             self._load_checkpoint_v0(args)
@@ -119,6 +135,11 @@ class ClassifierCNN(ClassifierBase):
         loader = DataLoader(dataset=dataset, batch_size=1024, shuffle=False, sampler=train_sampler)
         best_accuracy = 0.0
         for epoch in range(self.num_epochs):
+            if self.qat:
+                if epoch == 3:  # 经验值，可调
+                    self.model.apply(torch.ao.quantization.disable_observer)
+                # if epoch == 5:
+                #     self.model.apply(torch.ao.quantization.freeze_bn_stats)
             epoch_start_time = time.time()
             train_sampler.set_epoch(epoch)
             for inputs, labels in loader:
@@ -129,9 +150,22 @@ class ClassifierCNN(ClassifierBase):
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+                # break
             # val_accuracy = self.evaluate(x_val, y_val)
             val_accuracy = self.evaluate(data['test_path'])
             epoch_duration = time.time() - epoch_start_time
+            if self.qat and self.rank == 0:  # 只在主进程做
+                # self.model.cpu().eval()  # INT8 kernel 只在 CPU
+                # int8_model = convert_fx(self.model)
+                # torch.save(int8_model.state_dict(),
+                #            os.path.join(self.save_dir, 'qat_int8_final.pt'))
+                gm = self.model.module if isinstance(
+                    self.model, torch.nn.parallel.DistributedDataParallel) else self.model
+                gm.eval()
+                gm.apply(torch.ao.quantization.disable_observer)  # 停止收集 min/max
+                # gm.apply(torch.ao.quantization.freeze_bn_stats)  # 固定 BN 的均值方差
+                int8_model = convert_fx(gm)
+                torch.save(int8_model.state_dict(), os.path.join(self.save_dir, 'qat_int8_final.pt'))
             if self.rank == 0:
                 logging.info(
                     f'Epoch [{epoch + 1}/{self.num_epochs}],'
@@ -147,7 +181,12 @@ class ClassifierCNN(ClassifierBase):
                     torch.save(self.model.state_dict(), _path_save)
                     # torch.save(self.model.state_dict(),
                     #            f'/home/Huangzhe/test/manu-pc/tmp/afdd_models_local/best_e{epoch}.pt')
-                    logging.info(f'Saved new best model with accuracy: {best_accuracy:.4f}')
+                    if self.qat:
+                        self.model.cpu().eval()  # INT8 kernel 只在 CPU
+                        int8_model = convert_fx(self.model)
+                        _path_save_int8 = os.path.join(self.save_dir, f'i8_best_e{epoch}_b{best_accuracy:.4f}.pt')
+                        torch.save(int8_model.state_dict(), _path_save_int8)
+                        logging.info(f'Saved new best model with accuracy: {best_accuracy:.4f}')
 
                 # torch.save(self.model.state_dict(), f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/{epoch}.pt')
 
@@ -169,7 +208,7 @@ class ClassifierCNN(ClassifierBase):
                 features.extend(batch_feats)
         return np.array(predictions), np.array(features)
 
-    def evaluate(self, test_path, batch_size=1024):
+    def evaluate(self, test_path, batch_size=1024, n_total_samples=-4096):
         # dataset = SignalDataset(x, y, transform=self.features_generator.transform_sample,
         #                         seq_len=self.features_generator.seq_len)
         dataset = HDF5Dataset(test_path, self.features_generator.transform_sample)
@@ -178,14 +217,106 @@ class ClassifierCNN(ClassifierBase):
         all_predictions = []
         all_labels = []
         with torch.no_grad():
+            _cnt = 0
             for inputs, labels in loader:
+                if _cnt > n_total_samples > 0:
+                    break
                 inputs = inputs.to(self.local_rank)
                 labels = labels.to(self.local_rank)
                 outputs, _ = self.model(inputs)
                 batch_predictions = torch.sigmoid(outputs).flatten().cpu().numpy()
                 all_predictions.extend(batch_predictions)
                 all_labels.extend(labels.cpu().numpy())
+                _cnt += batch_size
         predictions = [1 if prob > 0.5 else 0 for prob in all_predictions]
         # result = accuracy_score(all_labels, predictions)
         result = f1_score(all_labels, predictions)
         return result
+
+
+class ClassifierONNX:
+    """
+    仅做推理/验证，不包含训练逻辑
+    """
+
+    def __init__(self, onnx_path: str, use_gpu: bool = False):
+        """
+        onnx_path : 保存的 .onnx 文件
+        use_gpu   : True 则优先使用 CUDAExecutionProvider
+        """
+        if not os.path.isfile(onnx_path):
+            raise FileNotFoundError(onnx_path)
+
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if use_gpu else ['CPUExecutionProvider']
+        self.session = ort.InferenceSession(onnx_path, providers=providers)
+        self.input_name = self.session.get_inputs()[0].name  # 取第一个输入名
+        self.features_generator = FeaturesGeneratorCNN()
+
+        # 下面两行只是为了保持接口一致，外部代码如果使用到可以继续调用
+        self.seq_len = self.features_generator.seq_len
+        self.onnx_path = onnx_path
+
+        logging.info(f'ONNX model loaded: {onnx_path}, providers={self.session.get_providers()}')
+
+    @staticmethod
+    def _sigmoid(x):
+        return 1.0 / (1.0 + np.exp(-x))
+
+    # ------------------------------------------------------------------
+    # 推理
+    # ------------------------------------------------------------------
+    def infer(self, x, batch_size: int = 16):
+        """
+        x 可以是 numpy array、list，或任何 InferenceDataset 支持的形式
+        返回: probs(np.ndarray), feats(np.ndarray or None)
+        """
+        dataset = InferenceDataset(
+            x,
+            transform=self.features_generator.transform_sample,
+            seq_len=self.features_generator.seq_len
+        )
+        loader = DataLoader(dataset, batch_size=batch_size)
+
+        probs_out, feats_out = [], []
+        has_feature_output = len(self.session.get_outputs()) > 1  # 按照导出时是否包含特征判断
+
+        for batch_x in loader:
+            batch_x = batch_x.numpy().astype(np.float32)  # ORT 只接受 numpy
+            ort_outs = self.session.run(None, {self.input_name: batch_x})
+
+            logits = ort_outs[0]
+            probs = self._sigmoid(logits).flatten()
+            probs_out.extend(probs)
+
+            if has_feature_output:
+                feats_out.extend(ort_outs[1])
+
+        probs_out = np.asarray(probs_out, dtype=np.float32)
+        feats_out = np.asarray(feats_out, dtype=np.float32) if has_feature_output else None
+        return probs_out, feats_out
+
+    # ------------------------------------------------------------------
+    # 验证
+    # ------------------------------------------------------------------
+    def evaluate(self, test_path: str, batch_size: int = 1, n_total_samples: int = -4096):
+        """
+        test_path : HDF5Dataset 的路径
+        """
+        dataset = HDF5Dataset(test_path, self.features_generator.transform_sample)
+        loader = DataLoader(dataset, batch_size=batch_size)
+
+        all_probs, all_labels = [], []
+        _cnt = 0
+        for inputs, labels in loader:
+            if _cnt > n_total_samples > 0:
+                break
+            inputs = inputs.numpy().astype(np.float32)
+            ort_outs = self.session.run(None, {self.input_name: inputs})
+            probs = self._sigmoid(ort_outs[0]).flatten()
+            all_probs.extend(probs)
+            all_labels.extend(labels.numpy())
+            _cnt += batch_size
+
+        preds = [1 if p > 0.5 else 0 for p in all_probs]
+        f1 = f1_score(all_labels, preds)
+        return f1

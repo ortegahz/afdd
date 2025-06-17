@@ -46,17 +46,17 @@ class NetAFDV0(nn.Module):
 import torch.nn as nn
 
 
-# # ------------- 基本积木 -------------
-# def CBR(in_c, out_c, k=3, s=1, p=1):  # Conv-BN-ReLU
-#     return nn.Sequential(
-#         nn.Conv1d(in_c, out_c, k, stride=s, padding=p, bias=False),
-#         nn.BatchNorm1d(out_c),
-#         nn.ReLU(inplace=True)
-#     )
+# ------------- 基本积木 -------------
+def CBR(in_c, out_c, k=3, s=1, p=1):  # Conv-BN-ReLU
+    return nn.Sequential(
+        nn.Conv1d(in_c, out_c, k, stride=s, padding=p, bias=False),
+        nn.BatchNorm1d(out_c),
+        nn.ReLU(inplace=True)
+    )
 
 
 # ------------- 主网络 -------------
-class NetAFDV1(nn.Module):
+class NetAFD(nn.Module):
     """
     下采样 448→224→112（AvgPool）→56→28→14→7（stride=2 Conv）
     """
@@ -106,12 +106,12 @@ class NetAFDV1(nn.Module):
 import torch.nn as nn
 
 
-def CBR(in_c, out_c, k=3, s=1, p=1):  # 普通 1-D Conv
-    return nn.Sequential(
-        nn.Conv1d(in_c, out_c, k, stride=s, padding=p, bias=False),
-        nn.BatchNorm1d(out_c),
-        nn.ReLU(inplace=True)
-    )
+# def CBR(in_c, out_c, k=3, s=1, p=1):  # 普通 1-D Conv
+#     return nn.Sequential(
+#         nn.Conv1d(in_c, out_c, k, stride=s, padding=p, bias=False),
+#         nn.BatchNorm1d(out_c),
+#         nn.ReLU(inplace=True)
+#     )
 
 
 class NetAFDV2(nn.Module):
@@ -183,7 +183,7 @@ class DSConv1d(nn.Sequential):
         )
 
 
-class NetAFD(nn.Module):
+class NetAFDV3(nn.Module):
     """
     总参数量 ≈ 3 091  (原始 NetAFD ≈ 80 921 → 缩到 3.8 %)
     采样点与原网络一致：448→224→112→56→28→14→7
