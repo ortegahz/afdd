@@ -29,7 +29,8 @@ set(CMAKE_CXX_STANDARD 14)   # 其余源码
 add_executable(afdd_test_pc
         main.cpp
         ai_model.c
-        onnx_wrapper.hpp        # 如果 ai_model 改成 C++ 则改为 .cpp
+        onnx_wrapper.hpp
+        test_samples.h
 )
 
 # 把 ai_model.c 当成 C++
@@ -37,6 +38,7 @@ set_source_files_properties(ai_model.c PROPERTIES LANGUAGE CXX)
 
 # 预定义宏
 target_compile_definitions(afdd_test_pc PRIVATE TARGET_PC)
+target_compile_definitions(afdd_test_pc PRIVATE USE_GLOBAL_DATA)
 
 # ========== 4. 头文件 / 库 ==========
 target_include_directories(afdd_test_pc PRIVATE ${ORT_INCLUDE_DIR})
