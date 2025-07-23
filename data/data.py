@@ -365,8 +365,9 @@ class DataRT(DataBase):
     def save(self, dir_save='/home/manu/tmp'):
         KEY = 'rt'
         logging.info(f"self.db[KEY].seq_len --> {self.db[KEY].seq_len}")
+        _path_save = os.path.join(dir_save, 'seq_power_i.txt')
+        np.savetxt(_path_save, self.db[KEY].seq_power, fmt='%.6f', newline=',')
         _path_save = os.path.join(dir_save, 'seq_power.txt')
-        # np.savetxt(_path_save, self.db[KEY].seq_power, fmt='%.6f', newline=',')
         np.savetxt(_path_save, self.db[KEY].seq_power, fmt='%f', delimiter='\n')
         _path_save = os.path.join(dir_save, 'seq_power_mean.txt')
         np.savetxt(_path_save, self.db[KEY].seq_power_mean, fmt='%f', delimiter='\n')

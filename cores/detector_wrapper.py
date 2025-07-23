@@ -45,12 +45,8 @@ class DetectorWrapperV0(DetectorWrapperBase):
             #     continue
             # if idx < 0.64 * 1e6 or idx > 0.66 * 1e6:  # for mcu alg test
             #     continue
-            # if idx < 0.40 * 1e6 or idx >= 0.42 * 1e6:  # for mcu alg test
-            #     continue
-            # if idx < 0.09 * 1e6 or idx > 0.11 * 1e6:  # for mcu alg test
-            #     continue
-            # if idx < 1.75 * 1e6 or idx > 10 * 1e6:
-            #     continue
+            if idx < 0.36 * 1e6 or idx >= 0.38 * 1e6:  # for mcu alg test
+                continue
             cur_power = db_offline_single.seq_power[idx]
             cur_hf = db_offline_single.seq_hf[idx]
             cur_state_gt_arc = db_offline_single.seq_state_arc[idx]

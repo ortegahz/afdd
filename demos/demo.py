@@ -41,7 +41,7 @@ def parse_args():
     # parser.add_argument('--db_key', default=None)
     # parser.add_argument('--dbo_type', default='DataV4')
     parser.add_argument('--addr',
-                        default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v33/data_sorted/串联碳化/正例-串联碳化-额定+1第三次_20k.bin')
+                        default='/media/manu/ST8000DM004-2U91/afdd/data/data_v31/data_sorted/负载抑制/负载抑制性试验2（定频空调）+1000W阻性负载_20k.bin')
     parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     parser.add_argument('--db_key', default='default')
     # parser.add_argument('--addr', default='/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v34/data_sorted/串联碳化/')
