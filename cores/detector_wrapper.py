@@ -45,7 +45,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
             #     continue
             # if idx < 0.64 * 1e6 or idx > 0.66 * 1e6:  # for mcu alg test
             #     continue
-            # if idx < 0.80 * 1e6 or idx > 0.82 * 1e6:  # for mcu alg test
+            # if idx < 0.40 * 1e6 or idx >= 0.42 * 1e6:  # for mcu alg test
             #     continue
             # if idx < 0.09 * 1e6 or idx > 0.11 * 1e6:  # for mcu alg test
             #     continue

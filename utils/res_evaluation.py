@@ -2,10 +2,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.spatial.distance import cosine
 from sklearn.metrics import mean_squared_error, mean_absolute_error
+import os
 
 # 文件路径
 file_path1 = '/home/manu/tmp/seq_state_pred_idle.txt'
-file_path2 = '/home/manu/tmp/seq_state_pred_idle_cpp.txt'
+root, ext = os.path.splitext(file_path1)
+file_path2 = f'{root}_cpp{ext}'
 
 # 读取数据
 data1 = np.loadtxt(file_path1)

@@ -120,9 +120,7 @@ static void load_labels(const char *label_file,
 /* ----------------------------------------------------------------- */
 int main(int argc, char *argv[]) {
     const char *input_file =
-            "/home/manu/mnt/ST8000DM004-2U91/afdd/data/"
-            "data_v34/data_sorted/负载抑制/正例-负载抑制性试验2（定频空调）"
-            "+1000W阻性负载第三次_20k.bin";
+            "/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v33/data_sorted/串联碳化/正例-串联碳化-额定+1第三次_20k.bin";
 
     const char *output_dir = (argc >= 3) ? argv[2] : "/home/manu/tmp";
 
