@@ -348,7 +348,7 @@ class DataRT(DataBase):
         self.db['rt'].seq_hf.append(cur_hf)
         self.db['rt'].seq_filtered.append(0)
         self.db['rt'].seq_filter_envelope.append(0)
-        self.db['rt'].seq_power_mean.append(cur_power)
+        self.db['rt'].seq_power_mean.append(0)
         self.db['rt'].seq_peak_mean.append(0)
         self.db['rt'].seq_wavelet.append([0] * self.wavelet_max_level)
         self.db['rt'].seq_state_pred_arc.append(0)
@@ -366,7 +366,10 @@ class DataRT(DataBase):
         KEY = 'rt'
         logging.info(f"self.db[KEY].seq_len --> {self.db[KEY].seq_len}")
         _path_save = os.path.join(dir_save, 'seq_power.txt')
-        np.savetxt(_path_save, self.db[KEY].seq_power, fmt='%.6f', newline=',')
+        # np.savetxt(_path_save, self.db[KEY].seq_power, fmt='%.6f', newline=',')
+        np.savetxt(_path_save, self.db[KEY].seq_power, fmt='%f', delimiter='\n')
+        _path_save = os.path.join(dir_save, 'seq_power_mean.txt')
+        np.savetxt(_path_save, self.db[KEY].seq_power_mean, fmt='%f', delimiter='\n')
         _path_save = os.path.join(dir_save, 'seq_state_pred_classifier.txt')
         np.savetxt(_path_save, self.db[KEY].seq_state_pred_classifier, fmt='%f', delimiter='\n')
         _path_save = os.path.join(dir_save, 'seq_state_pred_arc.txt')
@@ -375,6 +378,8 @@ class DataRT(DataBase):
         np.savetxt(_path_save, self.db[KEY].seq_state_gt_normal, fmt='%f', delimiter='\n')
         _path_save = os.path.join(dir_save, 'seq_state_pred_idle.txt')
         np.savetxt(_path_save, self.db[KEY].seq_state_pred_idle, fmt='%f', delimiter='\n')
+        _path_save = os.path.join(dir_save, 'info_pred_peaks.txt')
+        np.savetxt(_path_save, self.db[KEY].info_pred_peaks, fmt='%f', delimiter='\n')
 
     def plot(self, pause_time_s=1024, dir_save=None, save_name=None, show=True):
         plt.ion()
@@ -401,7 +406,7 @@ class DataRT(DataBase):
         plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
         plt.plot(time_stamps, np.array(seq_state_pred_balcony).astype(float), label='seq_state_pred_balcony')
         plt.plot(time_stamps, np.array(seq_state_pred_classifier).astype(float), label='seq_state_pred_classifier')
-        plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred', color='red')
+        # plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred', color='red')
         plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
         # plt.plot(time_stamps, np.array(seq_power_mean).astype(float), label='power_mean')
@@ -411,7 +416,7 @@ class DataRT(DataBase):
         plt.plot(time_stamps, np.array(seq_state_pred_idle).astype(float), label='state_idle_pred')
         # plt.plot(time_stamps, np.array(seq_state_pred_icr).astype(float), label='seq_state_pred_icr')
         for i, peak in enumerate(info_pred_peaks):
-            # logging.info((peak, seq_power[peak], seq_power_mean[peak] + 2048 * 0.05))
+            # logging.info((peak, seq_power[peak], seq_power_mean[peak]))
             plt.annotate(f'{info_af_scores[i]: .2f}',
                          (peak, seq_power[peak]),
                          textcoords="offset points",
@@ -461,6 +466,190 @@ class DataRT(DataBase):
             fig.set_size_inches(screen_width / fig.dpi, screen_height / fig.dpi)
             plt.savefig(os.path.join(dir_save, save_name), dpi=fig.dpi)
         plt.close()
+
+    def plot_arc(self,
+                 pause_time_s=1024,
+                 dir_save=None,
+                 save_name='arc',
+                 show=True,
+                 fixed_arc_len=4096,
+                 fixed_normal_len=1024):
+        """
+        画固定长度的故障电弧段和正常段。
+        """
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from pathlib import Path
+        from screeninfo import get_monitors
+        import os
+        import matplotlib.font_manager as fm
+
+        # 指定字体路径
+        font_path = '/home/manu/mnt/ST2000DM005-2U91/softwares/simhei.ttf'
+        # 创建字体属性对象
+        font_props = fm.FontProperties(fname=font_path)
+
+        plt.ion()
+        key = 'rt'
+
+        power_arr = np.asarray(self.db[key].seq_power, dtype=float)
+        seq_state_arc = np.asarray(self.db[key].seq_state_gt_arc) > 0  # bool mask
+        seq_len = len(power_arr)
+
+        # ---------- 1. 找到所有“连续”的故障电弧区段 ----------
+        arc_indices = np.where(seq_state_arc)[0]
+        if len(arc_indices) == 0:  # 没有故障电弧
+            print('No ARC found in this record.')
+            return
+
+        # 拆分成连续块
+        arc_segments = []  # [(start_i, end_i), ...]
+        seg_start = arc_indices[0]
+        prev_idx = arc_indices[0]
+        for idx in arc_indices[1:]:
+            if idx == prev_idx + 1:  # 还是同一连续段
+                prev_idx = idx
+            else:  # 断开了，保存上一段
+                arc_segments.append((seg_start, prev_idx))
+                seg_start, prev_idx = idx, idx
+        # 处理最后一段
+        arc_segments.append((seg_start, prev_idx))
+
+        # ---------- 2. 对每一段分别画图 ----------
+        for seg_no, (arc_start, arc_end) in enumerate(arc_segments, start=1):
+            # 固定长度处理
+            arc_len = min(fixed_arc_len, arc_end - arc_start + 1)
+            arc_end = arc_start + arc_len - 1
+            normal_end = arc_start - 1
+            normal_start = max(0, normal_end - fixed_normal_len + 1)
+
+            normal_indices = np.arange(normal_start, normal_end + 1, dtype=int)
+            arc_indices = np.arange(arc_start, arc_end + 1, dtype=int)
+
+            # ------- 2.1 生成 figure -------
+            fig, ax = plt.subplots(figsize=(12, 4))
+
+            # 正常段（绿）
+            if len(normal_indices):
+                ax.plot(normal_indices, power_arr[normal_indices],
+                        color='green', label='normal')
+
+            # 故障段（红）
+            ax.plot(arc_indices, power_arr[arc_indices],
+                    color='red', label='arc fault')
+
+            # x / y 轴范围
+            arc_min, arc_max = power_arr[arc_indices].min(), power_arr[arc_indices].max()
+            margin = 0.1 * (arc_max - arc_min) if arc_max != arc_min else 1.0
+            ax.set_ylim(arc_min - margin, arc_max + margin)
+            ax.set_xlim(normal_start, arc_end)
+            plt.title(save_name, fontproperties=font_props)
+            ax.set_xlabel('sample')
+            ax.set_ylabel('power')
+            ax.legend()
+            ax.grid(True)
+            plt.tight_layout()
+
+            # ------- 2.2 交互 / 保存 -------
+            if show:
+                plt.show()
+                plt.pause(pause_time_s)
+
+            if dir_save is not None:
+                Path(dir_save).mkdir(parents=True, exist_ok=True)
+                monitor = get_monitors()[0]
+                fig.set_size_inches(monitor.width / fig.dpi,
+                                    monitor.height / fig.dpi)
+                file_name = f'{save_name}_seg{seg_no}.png'
+                plt.savefig(os.path.join(dir_save, file_name), dpi=fig.dpi)
+
+            plt.close(fig)
+
+    def plot_arc_neg(self,
+                                seg_len=4096,  # 需要保留的点数
+                                dir_save=None,  # 目标保存目录（若为 None 则只显示）
+                                save_name='first_peak_seg',
+                                show=True,
+                                pause_time_s=1024):
+        """
+        从“第一个预测 peak”开始截取 seg_len 个采样点并保存（或显示）波形。
+        """
+        # ---- 常用库 ----
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from pathlib import Path
+        import os
+        from screeninfo import get_monitors
+        import matplotlib.font_manager as fm
+
+        # ---- 字体（与原代码保持一致，可按需修改）----
+        font_path = '/home/manu/mnt/ST2000DM005-2U91/softwares/simhei.ttf'
+        font_props = fm.FontProperties(fname=font_path)
+
+        # ---- 读取数据 ----
+        key = 'rt'
+        power_arr = np.asarray(self.db[key].seq_power, dtype=float)
+        peaks = np.asarray(self.db[key].info_pred_peaks, dtype=int)
+
+        # ---- 找第一个 peak ----
+        if peaks.size == 0:
+            print('!!! 该记录中没有检测到 peak，无法截取。')
+            return
+        first_peak = int(peaks[0])
+
+        # ---- 计算区间 ----
+        seq_len = power_arr.size
+        start_idx = first_peak
+        end_idx = min(start_idx + seg_len, seq_len)  # [start_idx, end_idx) 右开
+        sel_idx = np.arange(start_idx, end_idx, dtype=int)
+
+        # ---- 画图 ----
+        fig, ax = plt.subplots(figsize=(12, 4))
+        ax.plot(sel_idx, power_arr[sel_idx], label='neg sig', color='green')
+        # ax.plot(first_peak,
+        #         power_arr[first_peak],
+        #         'rx',
+        #         markersize=8,
+        #         label='first peak')
+
+        # 轴范围
+        y_min, y_max = power_arr[sel_idx].min(), power_arr[sel_idx].max()
+        margin = 0.1 * (y_max - y_min) if y_max != y_min else 1.0
+        ax.set_ylim(y_min - margin, y_max + margin)
+        ax.set_xlim(start_idx, sel_idx[-1])
+
+        # 标题/标签等
+        ax.set_title(save_name, fontproperties=font_props)
+        ax.set_xlabel('sample')
+        ax.set_ylabel('power')
+        ax.grid(True)
+        ax.legend()
+        plt.tight_layout()
+
+        # ---- 显示 / 保存 ----
+        if show:
+            plt.ion()
+            plt.show()
+            plt.pause(pause_time_s)
+
+        if dir_save is not None:
+            Path(dir_save).mkdir(parents=True, exist_ok=True)
+
+            # 按屏幕大小保存
+            monitor = get_monitors()[0]
+            fig.set_size_inches(monitor.width / fig.dpi,
+                                monitor.height / fig.dpi)
+
+            img_path = os.path.join(dir_save, f'{save_name}.png')
+            plt.savefig(img_path, dpi=fig.dpi)
+            print(f'图像已保存: {img_path}')
+
+            # # （可选）保存波形原始数据
+            # npy_path = os.path.join(dir_save, f'{save_name}.npy')
+            # np.save(npy_path, power_arr[sel_idx])
+            # print(f'波形数据已保存: {npy_path}')
+
+        plt.close(fig)
 
     def plot_cwt(self, pause_time_s=1024, dir_save=None, save_name=None, show=True):
         plt.ion()

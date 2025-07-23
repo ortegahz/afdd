@@ -43,10 +43,14 @@ class DetectorWrapperV0(DetectorWrapperBase):
             #     continue
             # if idx < 0.24 * 1e6 or idx > 0.26 * 1e6:  # for mcu alg test
             #     continue
-            # if idx < 0.10 * 1e6 or idx > 0.12 * 1e6:  # for mcu alg test
+            # if idx < 0.64 * 1e6 or idx > 0.66 * 1e6:  # for mcu alg test
             #     continue
-            if idx < 0.5 * 1e6 or idx > 1 * 1e6:
-                continue
+            # if idx < 0.80 * 1e6 or idx > 0.82 * 1e6:  # for mcu alg test
+            #     continue
+            # if idx < 0.09 * 1e6 or idx > 0.11 * 1e6:  # for mcu alg test
+            #     continue
+            # if idx < 1.75 * 1e6 or idx > 10 * 1e6:
+            #     continue
             cur_power = db_offline_single.seq_power[idx]
             cur_hf = db_offline_single.seq_hf[idx]
             cur_state_gt_arc = db_offline_single.seq_state_arc[idx]
@@ -62,13 +66,17 @@ class DetectorWrapperV0(DetectorWrapperBase):
             # self.arc_detector.sample_pos_v0()
         self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
                                   save_name=f'{case_name}.png', show=self.plot_show)
+        # self.arc_detector.db.plot_arc(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
+        #                               save_name=f'{case_name}.png', show=self.plot_show)
+        # self.arc_detector.db.plot_arc_neg(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
+        #                                   save_name=f'{case_name}.png', show=self.plot_show)
         # self.arc_detector.db.plot_cwt(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
         #                           save_name=f'{case_name}_{key}.png', show=self.plot_show)
         # self.arc_detector.db.plot_emd(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
         #                               save_name=f'{case_name}_{key}.png', show=self.plot_show)
         self.arc_detector.save_samples(path_save=self.svm_label_file)
         # self.arc_detector.save_seq()
-        # self.arc_detector.db.save()
+        self.arc_detector.db.save()
         self.arc_detector.reset()
 
     def run(self):
@@ -91,7 +99,7 @@ class DetectorWrapperV1(DetectorWrapperV0):
         super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
         self.pause_time_s = 0.01
         self.plot_show = False
-        self.arc_detector = ArcDetector()
+        # self.arc_detector = ArcDetector()
 
     def run(self):
         _cnt = 0
@@ -141,7 +149,7 @@ class DetectorWrapperV2(DetectorWrapperV1):
         super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
         self.pause_time_s = 0.01
         self.plot_show = False
-        self.arc_detector = ArcDetector()
+        # self.arc_detector = ArcDetector()
 
     def run(self):
         _cnt = 0
@@ -198,7 +206,7 @@ class DetectorWrapperV3NPY(DetectorWrapperV2):
         super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
         self.pause_time_s = 0.01
         self.plot_show = False
-        self.arc_detector = ArcDetector()
+        # self.arc_detector = ArcDetector()
 
     def run(self, _feat_sample=False):
         _cnt = 0

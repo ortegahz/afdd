@@ -17,3 +17,6 @@ tmp\.py
 /device/timer.mod
 /.vscode/settings.json
 /device/ad738x_reader
+/cpp/ai_model.c
+/cpp/ai_model.h
+/index.html

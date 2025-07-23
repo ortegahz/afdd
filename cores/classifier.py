@@ -4,12 +4,15 @@ import time
 
 import numpy as np
 import onnxruntime as ort
+import torch
 import torch.optim as optim
 import xgboost as xgb
 from sklearn.metrics import f1_score
 from torch.ao.quantization import get_default_qat_qconfig, QConfigMapping
 from torch.ao.quantization.quantize_fx import fuse_fx, prepare_qat_fx, convert_fx
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing import assert_close  # PyTorch ≥1.12 推荐
+from torch.utils.data import DataLoader
 from torch.utils.data import DataLoader
 
 from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset
@@ -192,20 +195,133 @@ class ClassifierCNN(ClassifierBase):
 
                 # self._save_checkpoint(f'/home/Huangzhe/test/manu-pc/tmp/afdd_models/{epoch}.pt', epoch, best_accuracy)
 
-    def infer(self, x, batch_size=16):
-        dataset = InferenceDataset(x, transform=self.features_generator.transform_sample,
-                                   seq_len=self.features_generator.seq_len)
+    # =============================================================
+    # 2. 使用 onnxruntime 推理
+    #    与 self.classifier.infer 保持同样的输入输出格式
+    # =============================================================
+    def infer_onnx(self,
+                   seq: np.ndarray,
+                   onnx_path: str = '/home/manu/tmp/classifier_sim.onnx',
+                   batch_size: int = 1):
+        """
+        seq: 1-D numpy array，原始序列
+        return: y_pred, hidden   # 两个输出
+        """
+
+        # ────────────────────── 1. 创建 / 缓存 session ──────────────────────
+        if not hasattr(self, '_ort_session'):
+            self._ort_session = ort.InferenceSession(
+                onnx_path,
+                providers=['CUDAExecutionProvider', 'CPUExecutionProvider']
+            )
+
+        # ────────────────────── 2. 处理输入 ──────────────────────
+        if isinstance(seq, torch.Tensor):
+            seq = seq.detach().cpu().numpy()
+
+        if seq.dtype != np.float32:
+            seq = seq.astype(np.float32)
+
+        # (batch, 1, seq_len)  ——  注意多了一个通道维
+        seq = seq.reshape(batch_size, 1, -1)
+
+        # 拿到输入 / 输出名字，避免手写出错
+        input_name = self._ort_session.get_inputs()[0].name  # 'input'
+        output_names = [o.name for o in self._ort_session.get_outputs()]  # ['y_pred', 'hidden']
+
+        # ────────────────────── 3. 推理 ──────────────────────
+        ort_outputs = self._ort_session.run(output_names,
+                                            {input_name: seq})
+
+        # ort_outputs 就是一个 list，对应 output_names 的顺序
+        y_pred, hidden = ort_outputs  # 也可以直接 return ort_outputs
+
+        return y_pred, hidden
+
+    # def infer(self, x, batch_size=16):
+    #     dataset = InferenceDataset(x, transform=self.features_generator.transform_sample,
+    #                                seq_len=self.features_generator.seq_len)
+    #     loader = DataLoader(dataset, batch_size=batch_size)
+    #     self.model.eval()
+    #     predictions, features = [], []
+    #     with torch.no_grad():
+    #         for batch_x in loader:
+    #             batch_x = batch_x.to(self.local_rank)
+    #             outputs, feats = self.model(batch_x)
+    #             outputs_onnx, feats_onnx = self.infer_onnx(batch_x)
+    #             outputs_onnx, feats_onnx = torch.from_numpy(outputs_onnx), torch.from_numpy(feats_onnx)
+    #             batch_predictions = torch.sigmoid(outputs).flatten().cpu().numpy()
+    #             predictions.extend(batch_predictions)
+    #             batch_feats = feats.flatten().cpu().numpy()
+    #             features.extend(batch_feats)
+    #     return np.array(predictions), np.array(features)
+
+    def infer(self, x, batch_size=16,
+              check_onnx=False,  # 是否做对齐校验
+              rtol=1e-02, atol=1e-05  # allclose 误差阈值
+              ):
+        """
+        返回:
+            predictions : (N,) numpy  – sigmoid 概率
+            features    : (N,) numpy  – 你模型返回的特征
+        如果 check_onnx=True，会在每个 batch 上验证
+        PyTorch 与 ONNX 输出(含特征)是否一致
+        """
+        dataset = InferenceDataset(
+            x,
+            transform=self.features_generator.transform_sample,
+            seq_len=self.features_generator.seq_len
+        )
         loader = DataLoader(dataset, batch_size=batch_size)
+
         self.model.eval()
         predictions, features = [], []
+
+        max_diff_out, max_diff_feat = 0.0, 0.0  # 方便事后查看最大误差
+
         with torch.no_grad():
             for batch_x in loader:
+                # ---------------- 1. PyTorch forward ----------------
                 batch_x = batch_x.to(self.local_rank)
-                outputs, feats = self.model(batch_x)
-                batch_predictions = torch.sigmoid(outputs).flatten().cpu().numpy()
-                predictions.extend(batch_predictions)
-                batch_feats = feats.flatten().cpu().numpy()
-                features.extend(batch_feats)
+                out_pt, feat_pt = self.model(batch_x)  # Tensor, Tensor
+
+                # ---------------- 2. ONNX forward ------------------
+                # infer_onnx 里可以接收 Tensor，所以直接传
+                out_onnx_np, feat_onnx_np = self.infer_onnx(batch_x)  # ndarray
+                out_onnx = torch.from_numpy(out_onnx_np).to(out_pt.device)
+                feat_onnx = torch.from_numpy(feat_onnx_np).to(feat_pt.device)
+
+                # ---------------- 3. 一致性校验 --------------------
+                if check_onnx:
+                    try:
+                        assert_close(out_pt, out_onnx, rtol=rtol, atol=atol)
+                        assert_close(feat_pt, feat_onnx, rtol=rtol, atol=atol)
+                    except AssertionError as e:
+                        # 打印最大误差方便排查
+                        diff_out = (out_pt - out_onnx).abs().max().item()
+                        diff_feat = (feat_pt - feat_onnx).abs().max().item()
+                        print(f"[WARN] Batch mismatch! "
+                              f"max|Δoutput|={diff_out:.4e}, "
+                              f"max|Δfeat|={diff_feat:.4e}")
+                        raise  # 如果想继续跑可注释掉
+
+                    # 统计全局最大 diff（可选）
+                    max_diff_out = max(max_diff_out,
+                                       (out_pt - out_onnx).abs().max().item())
+                    max_diff_feat = max(max_diff_feat,
+                                        (feat_pt - feat_onnx).abs().max().item())
+
+                # ---------------- 4. 收集结果 ----------------------
+                probs = torch.sigmoid(out_onnx).flatten().cpu().numpy()
+                predictions.extend(probs)
+                feats_np = feat_onnx.flatten().cpu().numpy()
+                features.extend(feats_np)
+
+        if check_onnx:
+            print(f"[OK] PyTorch ↔ ONNX 校验通过，"
+                  f"max|Δoutput|={max_diff_out:.4e}, "
+                  f"max|Δfeat|={max_diff_feat:.4e}")
+
         return np.array(predictions), np.array(features)
 
     def evaluate(self, test_path, batch_size=1024, n_total_samples=-4096):

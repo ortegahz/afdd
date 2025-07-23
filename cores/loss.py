@@ -44,6 +44,45 @@ class FocalLossV1(nn.Module):
             return F_loss
 
 
+class AdditiveMarginFocalLoss(nn.Module):
+
+    def __init__(self,
+                 margin: float = 0.35,
+                 scale: float = 32.0,
+                 alpha: float = 0.5,
+                 gamma: float = 2.0,
+                 reduction: str = "mean"):
+
+        super().__init__()
+        assert reduction in ("none", "mean", "sum")
+        self.m = float(margin)
+        self.s = float(scale)
+        self.alpha = float(alpha)
+        self.gamma = float(gamma)
+        self.reduction = reduction
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+
+        targets = targets.to(dtype=inputs.dtype, device=inputs.device)
+
+        t = targets * 2.0 - 1.0  # 1 -> +1, 0 -> -1
+        shifted_logits = (inputs - t * self.m) * self.s
+
+        bce_loss = F.binary_cross_entropy_with_logits(
+            shifted_logits, targets, reduction="none")
+
+        pt = torch.exp(-bce_loss)
+        alpha_t = targets * self.alpha + (1 - targets) * (1 - self.alpha)
+        focal_loss = alpha_t * (1 - pt) ** self.gamma * bce_loss
+
+        if self.reduction == "mean":
+            return focal_loss.mean()
+        elif self.reduction == "sum":
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+
 class HardExampleMiningFocalLoss(nn.Module):
     def __init__(self, alpha=0.5, gamma=2.0, hard_weight=2.0, hard_ratio=0.3):
         super().__init__()
