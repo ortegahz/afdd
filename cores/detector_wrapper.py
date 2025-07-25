@@ -35,17 +35,9 @@ class DetectorWrapperV0(DetectorWrapperBase):
         db_offline_single = self.db_offline.db[key]
         # for idx in range(0, db_offline_single.len, self.arc_detector.sub_sample_rate):
         for idx in range(0, db_offline_single.len):
-            # if idx < 0.334 * 1e6 or idx > 0.338 * 1e6:  # for mcu alg test
+            # if idx < 0.36 * 1e6 or idx >= 0.38 * 1e6:  # for mcu alg test
             #     continue
-            # if idx < 0.097 * 1e6 or idx > 0.108 * 1e6:  # for mcu alg test
-            #     continue
-            # if idx < 0.23 * 1e6 or idx > 0.25 * 1e6:  # for mcu alg test
-            #     continue
-            # if idx < 0.24 * 1e6 or idx > 0.26 * 1e6:  # for mcu alg test
-            #     continue
-            # if idx < 0.64 * 1e6 or idx > 0.66 * 1e6:  # for mcu alg test
-            #     continue
-            if idx < 0.36 * 1e6 or idx >= 0.38 * 1e6:  # for mcu alg test
+            if idx < 0.07 * 1e6 or idx >= 0.09 * 1e6:  # for mcu alg test
                 continue
             cur_power = db_offline_single.seq_power[idx]
             cur_hf = db_offline_single.seq_hf[idx]

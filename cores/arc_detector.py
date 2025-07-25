@@ -82,7 +82,7 @@ class ArcDetector:
         self.alarm_idle_cnt = 0
         self.feats_ref = []
         self.seq_power_proc_len = 0
-        self.export_onnx()
+        # self.export_onnx()
 
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v9 -  [v8] + data_v9/afdd_models/best_v4.pt'):
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v10 - [v9] + data_v8hard/afdd_models - 8gpu/afdd_models_mp_r1/best_e222_b0.8714.pt'):
@@ -1104,7 +1104,7 @@ class ArcDetector:
         _is_arc = _score * self.indicator_max_val > _th_raw
         # self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt - 0.5 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt  # !
-        self.alarm_arc_cnt = self.alarm_arc_cnt + 2 if _is_arc and _peak_val > self.indicator_max_val * 0.9 else self.alarm_arc_cnt  # !
+        self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc and _peak_val > self.indicator_max_val * 0.9 else self.alarm_arc_cnt  # !
         # if _is_arc and _peak_val > self.indicator_max_val * 0.9:
         #     print("2")
         # elif _is_arc:

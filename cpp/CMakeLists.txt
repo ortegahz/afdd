@@ -84,6 +84,14 @@ add_custom_command(
         COMMENT "Copying model file ai_model.h ..."
 )
 
+add_custom_command(
+        TARGET afdd_test_pc POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_samples.h
+        /home/manu/mnt/ST2000DM005-2U91/workspace/collection_firmware/App/cdc_acm/inc/test_samples.h
+        COMMENT "Copying model file test_samples.h ..."
+)
+
 # 增加栈大小到256MB（根据需要调整）
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(afdd_test_pc PRIVATE

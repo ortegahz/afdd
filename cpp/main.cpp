@@ -33,7 +33,7 @@ static void save_array_to_file(const char *filename,
     }
     for (size_t i = 0; i < length; ++i) {
         if (strcmp(format, "comma") == 0)
-            fprintf(fp, "%.6f%s", data[i], (i < length - 1) ? "," : "");
+            fprintf(fp, "%.6f%s", data[i], ",");
         else
             fprintf(fp, "%f\n", data[i]);
     }
@@ -238,7 +238,7 @@ int main(int argc, char *argv[]) {
 
 #define SAVE(name, arr) \
     snprintf(path, sizeof(path), "%s/" name "_cpp.txt", output_dir); \
-    save_array_to_file(path, arr, num_samples, "newline");
+    save_array_to_file(path, arr, num_samples, "comma");
 
     SAVE("seq_power", full_seq_power);
     SAVE("seq_state_pred_classifier", full_seq_state_pred_classifier);
@@ -249,7 +249,7 @@ int main(int argc, char *argv[]) {
 
     /* ----- 预测峰值索引单独保存 (长度不同) ------------------ */
     snprintf(path, sizeof(path), "%s/info_pred_peaks_cpp.txt", output_dir);
-    save_array_to_file(path, info_pred_peaks, data_rt.info_pred_peaks_len, "newline");
+    save_array_to_file(path, info_pred_peaks, data_rt.info_pred_peaks_len, "comma");
 
     /* 统计信息 */
     snprintf(path, sizeof(path), "%s/statistics_cpp.txt", output_dir);

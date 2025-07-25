@@ -364,23 +364,23 @@ class DataRT(DataBase):
 
     def save(self, dir_save='/home/manu/tmp'):
         KEY = 'rt'
+        # _fmt, _newline = '%f', '\n'
+        _fmt, _newline = '%.6f', ','
         logging.info(f"self.db[KEY].seq_len --> {self.db[KEY].seq_len}")
-        _path_save = os.path.join(dir_save, 'seq_power_i.txt')
-        np.savetxt(_path_save, self.db[KEY].seq_power, fmt='%.6f', newline=',')
         _path_save = os.path.join(dir_save, 'seq_power.txt')
-        np.savetxt(_path_save, self.db[KEY].seq_power, fmt='%f', delimiter='\n')
+        np.savetxt(_path_save, self.db[KEY].seq_power, fmt=_fmt, newline=_newline)
         _path_save = os.path.join(dir_save, 'seq_power_mean.txt')
-        np.savetxt(_path_save, self.db[KEY].seq_power_mean, fmt='%f', delimiter='\n')
+        np.savetxt(_path_save, self.db[KEY].seq_power_mean, fmt=_fmt, newline=_newline)
         _path_save = os.path.join(dir_save, 'seq_state_pred_classifier.txt')
-        np.savetxt(_path_save, self.db[KEY].seq_state_pred_classifier, fmt='%f', delimiter='\n')
+        np.savetxt(_path_save, self.db[KEY].seq_state_pred_classifier, fmt=_fmt, newline=_newline)
         _path_save = os.path.join(dir_save, 'seq_state_pred_arc.txt')
-        np.savetxt(_path_save, self.db[KEY].seq_state_pred_arc, fmt='%f', delimiter='\n')
+        np.savetxt(_path_save, self.db[KEY].seq_state_pred_arc, fmt=_fmt, newline=_newline)
         _path_save = os.path.join(dir_save, 'seq_state_gt_normal.txt')
-        np.savetxt(_path_save, self.db[KEY].seq_state_gt_normal, fmt='%f', delimiter='\n')
+        np.savetxt(_path_save, self.db[KEY].seq_state_gt_normal, fmt=_fmt, newline=_newline)
         _path_save = os.path.join(dir_save, 'seq_state_pred_idle.txt')
-        np.savetxt(_path_save, self.db[KEY].seq_state_pred_idle, fmt='%f', delimiter='\n')
+        np.savetxt(_path_save, self.db[KEY].seq_state_pred_idle, fmt=_fmt, newline=_newline)
         _path_save = os.path.join(dir_save, 'info_pred_peaks.txt')
-        np.savetxt(_path_save, self.db[KEY].info_pred_peaks, fmt='%f', delimiter='\n')
+        np.savetxt(_path_save, self.db[KEY].info_pred_peaks, fmt=_fmt, newline=_newline)
 
     def plot(self, pause_time_s=1024, dir_save=None, save_name=None, show=True):
         plt.ion()

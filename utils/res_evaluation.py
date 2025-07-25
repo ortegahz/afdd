@@ -5,13 +5,17 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error
 import os
 
 # 文件路径
-file_path1 = '/home/manu/tmp/seq_state_pred_idle.txt'
-root, ext = os.path.splitext(file_path1)
-file_path2 = f'{root}_cpp{ext}'
+file_path1 = '/home/manu/tmp/seq_state_pred_arc.txt'
+# root, ext = os.path.splitext(file_path1)
+# file_path2 = f'{root}_cpp{ext}'
+file_path2 = '/home/manu/tmp/Serial Debug 2025-07-25 094749.txt'
 
 # 读取数据
-data1 = np.loadtxt(file_path1)
-data2 = np.loadtxt(file_path2)
+# data1 = np.loadtxt(file_path1)
+# data2 = np.loadtxt(file_path2)
+_delimiter = ','
+data1 = np.genfromtxt(file_path1, delimiter=_delimiter, filling_values=0.0)[:-1]
+data2 = np.genfromtxt(file_path2, delimiter=_delimiter, filling_values=0.0)[:-1]
 
 # 计算多种相似度指标
 cosine_similarity = 1 - cosine(data1, data2)
