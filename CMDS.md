@@ -41,3 +41,11 @@ INFO:root:best val_accuracy -> 0.9732620320855615
 python -m onnxruntime.quantization.preprocess \
        --input  /home/manu/tmp/afdd_e447.onnx \
        --output /home/manu/tmp/afdd_e447_pre.onnx
+
+# statics
+INFO:root:Namespace(path_label_train='/home/Huangzhe/test/afd_pm_train', save_dir='/dev/shm/afd_pm_hdf5')
+INFO:root:ros -> Counter({0: 6229475, 1: 6229475})
+INFO:root:Counter(y_train_aug) -> Counter({1: 4360633, 0: 4360632})
+INFO:root:Counter(y_test_aug) -> Counter({0: 1868843, 1: 1868842})
+INFO:root:Counter(y_train) -> Counter({0: 4360632, 1: 97882})
+INFO:root:Counter(y_test) -> Counter({0: 1868843, 1: 41949})
