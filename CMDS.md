@@ -22,6 +22,9 @@ python demos/demo_classifier.py
 torchrun --nproc_per_node=8 demos/demo_classifier.py
 screen torchrun --nproc_per_node=8 demos/demo_classifier.py
 torchrun --nproc_per_node=8 --master_addr=172.20.254.132 --master_port=29501 demos/demo_classifier.py
+torchrun --nproc_per_node=8 --master_addr=172.20.254.199 --master_port=29501 demos/demo_classifier.py
+
+screen torchrun --nproc_per_node=8 --master_addr=172.20.254.199 --master_port=29501 demos/demo_classifier.py
 
 # demo
 python demos/demo.py --dir_plot_save /home/manu/tmp/demo_arc_detector_save_single --dtr_type DetectorWrapperV0 --db_key default --addr "/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v21/data_sorted/自主正例/电钻最高速运行_0.npy"
