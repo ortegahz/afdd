@@ -98,8 +98,9 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/models_arm/v7 - [fv6] min-max normal/afdd_models_mp/best_e378_b0.9836.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v5/best_e323_b0.9766.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v0/best_e319_b0.9819.pt'):
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v1/best_e348_b0.9867.pt'):
+    # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v1/best_e348_b0.9867.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e472_b0.9878.pt'):
+    def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v9 - dv37/afdd_models_mp/best_e501_b0.9864.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
