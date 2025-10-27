@@ -479,7 +479,7 @@ class ClassifierCNNAE(ClassifierBase):
             plot_target_label = None  # Invalidate plotting
 
         all_errors, all_labels = [], []
-        plotted = False
+        plotted_neg, plotted_pos = False, False
         sample_type_counter = 0  # 计数找到的目标类型样本数量
 
         with torch.no_grad():
@@ -491,7 +491,7 @@ class ClassifierCNNAE(ClassifierBase):
 
                 # --- 新增：查找并绘制指定次序的样本 ---
                 _save_dir = "/home/manu/tmp"
-                if plot_target_label is not None and not plotted and self.rank == 0:
+                if plot_target_label is not None and (not plotted_neg or not plotted_pos) and self.rank == 0:
                     # 找到当前批次中所有目标标签的索引
                     target_indices_in_batch = (labels.view(-1) == plot_target_label).nonzero(as_tuple=True)[0]
                     num_targets_in_batch = len(target_indices_in_batch)
@@ -507,11 +507,14 @@ class ClassifierCNNAE(ClassifierBase):
                             original_signal = inputs[idx_in_batch].cpu().numpy().flatten()
                             reconstructed_signal = reconstructions[idx_in_batch].cpu().numpy().flatten()
                             error_for_sample = errors[idx_in_batch]
+                            pointwise_squared_error = (original_signal - reconstructed_signal) ** 2
+                            max_pointwise_error = np.mean(pointwise_squared_error)
 
                             fig, axs = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
                             title = (
-                                f'Reconstruction of {plot_target_ordinal + 1}-th {"Positive" if plot_target_label == 1 else "Negative"} Sample | '
-                                f'MSE: {error_for_sample:.6f}')
+                                f'Reconstruction of {plot_target_ordinal + 1}-th {"Positive" if plot_target_label == 1 else "Negative"} Sample\n'
+                                f'MSE: {error_for_sample:.6f} | Mean Point-wise Sq. Error: {max_pointwise_error:.6f}'
+                            )
                             fig.suptitle(title, fontsize=16)
 
                             axs[0].plot(original_signal, color='blue', label='Original')
@@ -538,7 +541,8 @@ class ClassifierCNNAE(ClassifierBase):
                             plt.savefig(plot_filename)
                             logging.info(f"Saved reconstruction plot to '{plot_filename}'")
                             plt.close(fig)
-                            plotted = True
+                            plotted_pos = True if plot_target_label == 1 else plotted_pos
+                            plotted_neg = True if plot_target_label == 0 else plotted_neg
                         except ImportError:
                             logging.warning(
                                 "Matplotlib not found, skipping plot. Install with 'pip install matplotlib'.")
@@ -549,6 +553,7 @@ class ClassifierCNNAE(ClassifierBase):
                 all_errors.extend(errors)
                 all_labels.extend(labels.cpu().numpy().flatten())
 
+        plotted = plotted_pos and plotted_neg
         # --- 新增：检查是否成功绘图 ---
         if plot_target_label is not None and not plotted and self.rank == 0:
             logging.warning(

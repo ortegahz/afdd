@@ -66,13 +66,13 @@ def parse_args():
     plot_group.add_argument(
         '--plot_positive_index',
         type=int,
-        default=64,
+        default=128,
         help="Plot the N-th positive (anomaly) sample found. e.g., '--plot_positive_index 1' for the first one."
     )
     plot_group.add_argument(
         '--plot_negative_index',
         type=int,
-        metavar='N',
+        default=64,
         help="Plot the N-th negative (normal) sample found. e.g., '--plot_negative_index 5' for the fifth one."
     )
     return parser.parse_args()
