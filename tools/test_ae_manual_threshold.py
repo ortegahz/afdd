@@ -62,6 +62,19 @@ def parse_args():
         default=64,
         help="Index of a test sample to plot for reconstruction analysis. A .png file will be saved."
     )
+    plot_group = parser.add_mutually_exclusive_group()
+    plot_group.add_argument(
+        '--plot_positive_index',
+        type=int,
+        default=64,
+        help="Plot the N-th positive (anomaly) sample found. e.g., '--plot_positive_index 1' for the first one."
+    )
+    plot_group.add_argument(
+        '--plot_negative_index',
+        type=int,
+        metavar='N',
+        help="Plot the N-th negative (normal) sample found. e.g., '--plot_negative_index 5' for the fifth one."
+    )
     return parser.parse_args()
 
 
@@ -114,7 +127,8 @@ def main():
     overall_accuracy = classifier.evaluate(
         test_path=args.test_data_path,
         threshold=args.threshold,
-        plot_sample_index=args.plot_sample_index
+        plot_positive_index=args.plot_positive_index,
+        plot_negative_index=args.plot_negative_index
     )
 
     logging.info("-" * 40)

@@ -444,13 +444,14 @@ class ClassifierCNNAE(ClassifierBase):
                     logging.info(
                         f'Saved new best AE model with validation accuracy: {best_accuracy:.4f} to {_path_save}')
 
-    def evaluate(self, test_path, batch_size=1024, threshold=None, plot_sample_index=None):
+    def evaluate(self, test_path, batch_size=1024, threshold=None, plot_positive_index=None, plot_negative_index=None):
         """
         在测试集上评估自编码器模型，并计算详细的准确率指标。
 
         工作流程:
         1. 对测试集中的每个样本计算其均方重构误差（MSE）。
-        2. 如果提供了 plot_sample_index，则找到该样本并将其原始信号、重构信号与叠加图保存为图像。
+        2. 如果提供了 plot_positive_index 或 plot_negative_index, 则找到指定次序的样本并将其原始信号、
+           重构信号与叠加图保存为图像。
         3. 使用真实标签和重构误差，通过ROC曲线分析找到一个最佳阈值（除非手动指定），
            该阈值旨在最大化Youden指数 J = TPR - FPR (真阳性率 - 假阳性率)。
         4. 如果样本的重构误差高于此阈值，则将其分类为异常（1），否则为正常（0）。
@@ -463,57 +464,77 @@ class ClassifierCNNAE(ClassifierBase):
         model_to_eval = self.model.module if isinstance(self.model, DDP) else self.model
         model_to_eval.eval()
 
+        # --- 新增：绘图目标设置 ---
+        plot_target_label = None
+        plot_target_ordinal = None
+        if plot_positive_index is not None:
+            plot_target_label = 1
+            plot_target_ordinal = plot_positive_index - 1  # 用户从1开始计数，代码从0开始
+        elif plot_negative_index is not None:
+            plot_target_label = 0
+            plot_target_ordinal = plot_negative_index - 1
+
+        if plot_target_ordinal is not None and plot_target_ordinal < 0:
+            logging.error("Plot index must be a positive integer (>= 1).")
+            plot_target_label = None  # Invalidate plotting
+
         all_errors, all_labels = [], []
-        sample_idx_counter = 0
         plotted = False
+        sample_type_counter = 0  # 计数找到的目标类型样本数量
 
         with torch.no_grad():
             for inputs, labels in loader:
                 inputs = inputs.to(self.local_rank)
                 reconstructions, _ = model_to_eval(inputs)
 
-                # 计算每个样本的MSE重构误差
                 errors = torch.mean((inputs - reconstructions) ** 2, dim=(1, 2)).cpu().numpy()
 
-                # --- 新增：如果指定了样本索引，则绘图 ---
-                if plot_sample_index is not None and not plotted and self.rank == 0:
-                    current_batch_size = inputs.size(0)
-                    if sample_idx_counter <= plot_sample_index < sample_idx_counter + current_batch_size:
+                # --- 新增：查找并绘制指定次序的样本 ---
+                _save_dir = "/home/manu/tmp"
+                if plot_target_label is not None and not plotted and self.rank == 0:
+                    # 找到当前批次中所有目标标签的索引
+                    target_indices_in_batch = (labels.view(-1) == plot_target_label).nonzero(as_tuple=True)[0]
+                    num_targets_in_batch = len(target_indices_in_batch)
+
+                    if sample_type_counter <= plot_target_ordinal < sample_type_counter + num_targets_in_batch:
                         try:
                             import matplotlib.pyplot as plt
+                            # 计算目标样本在当前批次的目标样本列表中的位置
+                            ordinal_in_batch = plot_target_ordinal - sample_type_counter
+                            # 获取其在完整批次中的索引
+                            idx_in_batch = target_indices_in_batch[ordinal_in_batch]
 
-                            idx_in_batch = plot_sample_index - sample_idx_counter
                             original_signal = inputs[idx_in_batch].cpu().numpy().flatten()
                             reconstructed_signal = reconstructions[idx_in_batch].cpu().numpy().flatten()
-                            label_val = int(labels[idx_in_batch].item())
                             error_for_sample = errors[idx_in_batch]
 
                             fig, axs = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
-                            title = (f'Reconstruction of Sample #{plot_sample_index} | '
-                                     f'Label: {"Anomaly" if label_val == 1 else "Normal"} ({label_val}) | '
-                                     f'MSE Error: {error_for_sample:.6f}')
+                            title = (
+                                f'Reconstruction of {plot_target_ordinal + 1}-th {"Positive" if plot_target_label == 1 else "Negative"} Sample | '
+                                f'MSE: {error_for_sample:.6f}')
                             fig.suptitle(title, fontsize=16)
 
                             axs[0].plot(original_signal, color='blue', label='Original')
-                            axs[0].set_title('Original Signal')
+                            axs[0].set_title('Original Signal');
                             axs[0].legend(loc='upper right');
                             axs[0].grid(True, linestyle='--', alpha=0.6)
 
                             axs[1].plot(reconstructed_signal, color='orange', label='Reconstructed')
-                            axs[1].set_title('Reconstructed Signal')
+                            axs[1].set_title('Reconstructed Signal');
                             axs[1].legend(loc='upper right');
                             axs[1].grid(True, linestyle='--', alpha=0.6)
 
                             axs[2].plot(original_signal, label='Original', color='blue', alpha=0.9)
                             axs[2].plot(reconstructed_signal, label='Reconstructed', color='red', linestyle='--',
                                         alpha=0.8)
-                            axs[2].set_title('Overlay')
+                            axs[2].set_title('Overlay');
                             axs[2].set_xlabel('Time Step');
                             axs[2].legend(loc='upper right');
                             axs[2].grid(True, linestyle='--', alpha=0.6)
 
                             plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-                            plot_filename = f'/home/manu/tmp/reconstruction_sample_{plot_sample_index}.png'
+                            plot_filename = f'reconstruction_{"positive" if plot_target_label == 1 else "negative"}_sample_{plot_target_ordinal + 1}.png'
+                            plot_filename = os.path.join(_save_dir, plot_filename)
                             plt.savefig(plot_filename)
                             logging.info(f"Saved reconstruction plot to '{plot_filename}'")
                             plt.close(fig)
@@ -522,10 +543,17 @@ class ClassifierCNNAE(ClassifierBase):
                             logging.warning(
                                 "Matplotlib not found, skipping plot. Install with 'pip install matplotlib'.")
                             plotted = True  # 避免重复警告
+                    sample_type_counter += num_targets_in_batch
 
+                # 收集所有样本的误差和标签用于最终评估
                 all_errors.extend(errors)
                 all_labels.extend(labels.cpu().numpy().flatten())
-                sample_idx_counter += inputs.size(0)
+
+        # --- 新增：检查是否成功绘图 ---
+        if plot_target_label is not None and not plotted and self.rank == 0:
+            logging.warning(
+                f"Could not find the {plot_target_ordinal + 1}-th {'positive' if plot_target_label == 1 else 'negative'} sample. "
+                f"The dataset may contain fewer than this number of samples of that type.")
 
         all_errors = np.array(all_errors)
         all_labels = np.array(all_labels)
@@ -553,7 +581,7 @@ class ClassifierCNNAE(ClassifierBase):
         predictions = (all_errors >= best_threshold).astype(int)
         accuracy = accuracy_score(all_labels, predictions)
 
-        # ==================== 新增：计算并打印详细指标 ====================
+        # ==================== 计算并打印详细指标 ====================
         num_positives = np.sum(all_labels == 1)
         num_negatives = np.sum(all_labels == 0)
 
