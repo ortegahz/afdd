@@ -51,7 +51,8 @@ class DetectorWrapperV0(DetectorWrapperBase):
                                         cur_state_gt_normal=cur_state_gt_normal)
             # self.arc_detector.infer_v5(feat_sample=feat_sample)
             # self.arc_detector.infer_v3(feat_sample=feat_sample)
-            self.arc_detector.sample()
+            # self.arc_detector.sample()
+            self.arc_detector.sample_ae()
             # self.arc_detector.sample(pos_only=True)
             # self.arc_detector.sample_pos_v0()
         self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,

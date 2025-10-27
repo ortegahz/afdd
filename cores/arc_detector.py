@@ -102,7 +102,8 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v0/best_e319_b0.9819.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v1/best_e348_b0.9867.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e472_b0.9878.pt'):
-    def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v9 - dv37/afdd_models_mp/best_e501_b0.9864.pt'):
+    def _build_model(self,
+                     path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v9 - dv37/afdd_models_mp/best_e501_b0.9864.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -1206,6 +1207,36 @@ class ArcDetector:
             self.samples_pos.append(_seq_pick)
             self.db.db['rt'].info_pred_peaks.append(adjusted_peak_idx)
             self.db.db['rt'].info_af_scores.append(0.)
+
+    def sample_ae(self):
+        """
+        Sample without peak detection based on label at the end of the window.
+        Saves a sequence as a positive sample if its end index is in a positive state,
+        and as a negative sample otherwise.
+        """
+        # Wait until we have enough data for a full window
+        if self.db.db['rt'].seq_len < self.af_win_size:
+            return
+
+        # Define indices
+        end_idx_exclusive = self.db.db['rt'].seq_len
+        start_idx = end_idx_exclusive - self.af_win_size
+        label_idx = end_idx_exclusive - 1
+
+        # Get label from the end of the window
+        is_positive = self.db.db['rt'].seq_state_gt_arc[label_idx] > 0
+
+        # Extract the sequence from seq_power
+        _seq_pick = np.array(self.db.db['rt'].seq_power[start_idx:end_idx_exclusive]).astype(float)
+
+        # Do not save if peak-to-peak amplitude is too small
+        if np.max(_seq_pick) - np.min(_seq_pick) <= MIN_VAL_TH * 2:
+            return
+
+        # Save the sample
+        (self.samples_pos if is_positive else self.samples_neg).append(_seq_pick)
+        if is_positive:
+            self.db.db['rt'].seq_state_pred_arc[label_idx] = self.indicator_max_val / 2
 
     def sample(self, pos_only=False):
         if self.db.db['rt'].seq_len < self.af_win_size:  # waiting for enough data
