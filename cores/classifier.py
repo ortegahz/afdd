@@ -7,10 +7,10 @@ import time
 import numpy as np
 import onnxruntime as ort
 import torch
-import torch.optim as optim
 import torch.nn as nn
+import torch.optim as optim
 import xgboost as xgb
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, accuracy_score, roc_curve
 from torch.ao.quantization import get_default_qat_qconfig, QConfigMapping
 from torch.ao.quantization.quantize_fx import fuse_fx, prepare_qat_fx, convert_fx
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -400,7 +400,7 @@ class ClassifierCNNAE(ClassifierBase):
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None
         loader = DataLoader(dataset=dataset, batch_size=1024, shuffle=not is_distributed, sampler=train_sampler)
 
-        best_loss = float('inf')
+        best_accuracy = 0.0
         for epoch in range(self.num_epochs):
             epoch_start_time = time.time()
             if is_distributed:
@@ -426,42 +426,102 @@ class ClassifierCNNAE(ClassifierBase):
                 num_batches += 1
 
             avg_epoch_loss = epoch_loss / num_batches if num_batches > 0 else 0
-            val_loss = self.evaluate(data['test_path'])
+            val_accuracy = self.evaluate(data['test_path'])
             epoch_duration = time.time() - epoch_start_time
 
             if self.rank == 0:
                 logging.info(
                     f'Epoch [{epoch + 1}/{self.num_epochs}],'
                     f' Train Loss: {avg_epoch_loss:.8f},'
-                    f' Validation Loss: {val_loss:.8f},'
+                    f' Validation Accuracy: {val_accuracy:.4f},'
                     f' Time: {epoch_duration:.2f} seconds')
 
-                if val_loss < best_loss and val_loss > 0:
-                    best_loss = val_loss
+                if val_accuracy > best_accuracy:
+                    best_accuracy = val_accuracy
                     model_to_save = self.model.module if isinstance(self.model, DDP) else self.model
-                    _path_save = os.path.join(self.save_dir, f'ae_best_e{epoch}_loss{best_loss:.6f}.pt')
+                    _path_save = os.path.join(self.save_dir, f'ae_best_e{epoch}_acc{best_accuracy:.4f}.pt')
                     torch.save(model_to_save.state_dict(), _path_save)
-                    logging.info(f'Saved new best AE model with validation loss: {best_loss:.8f} to {_path_save}')
+                    logging.info(
+                        f'Saved new best AE model with validation accuracy: {best_accuracy:.4f} to {_path_save}')
 
     def evaluate(self, test_path, batch_size=1024):
+        """
+        在测试集上评估自编码器模型，并计算详细的准确率指标。
+
+        工作流程:
+        1. 对测试集中的每个样本计算其均方重构误差（MSE）。
+        2. 使用真实标签和重构误差，通过ROC曲线分析找到一个最佳阈值，
+           该阈值旨在最大化Youden指数 J = TPR - FPR (真阳性率 - 假阳性率)。
+        3. 如果样本的重构误差高于此阈值，则将其分类为异常（1），否则为正常（0）。
+        4. 基于这些预测计算总体准确率、正例准确率（召回率）和负例准确率（特异性）。
+        5. 打印详细的统计信息并返回总体准确率。
+        """
         dataset = HDF5Dataset(test_path, self.features_generator.transform_sample)
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
         model_to_eval = self.model.module if isinstance(self.model, DDP) else self.model
         model_to_eval.eval()
-        total_loss, num_samples = 0.0, 0
+
+        all_errors = []
+        all_labels = []
+
         with torch.no_grad():
             for inputs, labels in loader:
-                normal_indices = (labels.view(-1) == 0)
-                if not torch.any(normal_indices): continue
-                inputs_normal = inputs[normal_indices].to(self.local_rank)
-                if inputs_normal.size(0) == 0: continue
-                reconstructions, _ = model_to_eval(inputs_normal)
-                loss = self.criterion(reconstructions, inputs_normal)
-                total_loss += loss.item() * inputs_normal.size(0)
-                num_samples += inputs_normal.size(0)
+                inputs = inputs.to(self.local_rank)
+                reconstructions, _ = model_to_eval(inputs)
+
+                # 计算每个样本的MSE重构误差
+                errors = torch.mean((inputs - reconstructions) ** 2, dim=(1, 2)).cpu().numpy()
+                all_errors.extend(errors)
+                all_labels.extend(labels.cpu().numpy().flatten())
+
+        all_errors = np.array(all_errors)
+        all_labels = np.array(all_labels)
+
+        # 处理测试集只包含一个类别的边缘情况
+        if len(np.unique(all_labels)) < 2:
+            model_to_eval.train()
+            logging.warning(
+                f"Evaluation set contains only one class ({np.unique(all_labels)}), cannot compute a meaningful ROC curve. "
+                "Returning 0.0 accuracy."
+            )
+            return 0.0
+
+        # 找到区分正常和异常样本的最佳阈值
+        fpr, tpr, thresholds = roc_curve(all_labels, all_errors)
+        j_scores = tpr - fpr
+        best_threshold_idx = np.argmax(j_scores)
+        best_threshold = thresholds[best_threshold_idx]
+
+        # 基于最佳阈值进行预测
+        predictions = (all_errors >= best_threshold).astype(int)
+        accuracy = accuracy_score(all_labels, predictions)
+
+        # ==================== 新增：计算并打印详细指标 ====================
+        num_positives = np.sum(all_labels == 1)
+        num_negatives = np.sum(all_labels == 0)
+
+        # 计算每个类别被正确预测的数量
+        correct_positives = np.sum((predictions == 1) & (all_labels == 1))
+        correct_negatives = np.sum((predictions == 0) & (all_labels == 0))
+
+        # 计算每个类别的准确率
+        acc_positives = correct_positives / num_positives if num_positives > 0 else 0.0  # 也称为召回率 (Recall) 或 TPR
+        acc_negatives = correct_negatives / num_negatives if num_negatives > 0 else 0.0  # 也称为特异性 (Specificity) 或 TNR
+
+        # 只在主进程上打印日志，避免分布式训练时重复打印
+        if self.rank == 0:
+            logging.info(
+                f"  [Eval Stats] Negatives(0): {num_negatives} samples, Acc: {acc_negatives:.4f} | "
+                f"Positives(1): {num_positives} samples, Acc: {acc_positives:.4f} | "
+                f"Threshold: {best_threshold:.6f}"
+            )
+        # =================================================================
+
+        # 在退出前确保模型切换回训练模式
         model_to_eval.train()
-        return total_loss / num_samples if num_samples > 0 else float('inf')
+
+        return accuracy
 
 
 class ClassifierONNX:
