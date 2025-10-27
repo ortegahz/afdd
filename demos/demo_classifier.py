@@ -13,18 +13,21 @@ from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from xgboost import plot_importance
 
-from cores.classifier import ClassifierXGB, ClassifierCNN
+from cores.classifier import ClassifierXGB, ClassifierCNN, ClassifierCNNAE
 from utils.utils import set_logging, svm_label2data_v1
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--load_dir', default='/dev/shm/afd_pm_hdf5')
+    # parser.add_argument('--load_dir', default='/dev/shm/afd_pm_hdf5')
+    parser.add_argument('--load_dir', default='/home/manu/tmp/')
     parser.add_argument('--save_dir', default='/home/Huangzhe/test/afdd_models_mp')
     parser.add_argument('--path_save', default='/home/manu/tmp/xgb.pt')
     parser.add_argument('--path_label_train', default='/home/manu/tmp/afd_pm_train')
     # parser.add_argument('--path_label_test', default='/home/Huangzhe/test/afd_pm_test')
     parser.add_argument('--path_ckpt', default=None)
+    parser.add_argument('--model_type', type=str, default='cnn-ae', choices=['cnn', 'cnn-ae'],
+                        help='Type of CNN model to run: supervised (cnn) or unsupervised AE (cnn-ae)')
     parser.add_argument('--local_rank', type=int, default=0, help='Local rank for distributed training')
     parser.add_argument('--qat', default=False, help='enable quant-aware training')
     return parser.parse_args()
@@ -92,20 +95,43 @@ def run_cnn(args):
     classifier.train(_data)
 
 
+def run_cnn_ae(args):
+    logging.info(args)
+    _seed = 128
+    torch.manual_seed(_seed)
+
+    classifier = ClassifierCNNAE(args, ddp=True)
+    _data = {
+        'train_path': os.path.join(args.load_dir, 'train_data.h5'),
+        'test_path': os.path.join(args.load_dir, 'test_data.h5'),
+    }
+    # The training data in train_path should consist of mostly normal samples.
+    # The ClassifierCNNAE will filter out any positive samples during training/evaluation.
+    classifier.train(_data)
+
+
 def main_worker(rank, world_size, args):
     # os.environ['CUDA_VISIBLE_DEVICES'] = '7'
     # torch.cuda.set_device(0)
 
-    torch.cuda.set_device(args.local_rank)
-    torch.cuda.empty_cache()
-    dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
+    is_distributed = world_size > 1
+    if is_distributed:
+        torch.cuda.set_device(args.local_rank)
+        torch.cuda.empty_cache()
+        dist.init_process_group(backend='nccl', init_method='env://', world_size=world_size, rank=rank)
+        logging.info(f'Process {rank} of {world_size} is using GPU {args.local_rank}')
+    else:
+        torch.cuda.set_device(args.local_rank)
+        logging.info(f'Running in non-distributed mode on GPU {args.local_rank}')
+
     set_logging()
 
     args.rank = rank
-    args.local_rank = rank
     args.world_size = world_size
-    logging.info(f'Process {rank} is using GPU {args.local_rank}')
-    run_cnn(args)
+    if args.model_type == 'cnn':
+        run_cnn(args)
+    elif args.model_type == 'cnn-ae':
+        run_cnn_ae(args)
 
 
 def main():
@@ -115,9 +141,13 @@ def main():
     # run_xgb(args)
     # run_cnn(args)
 
-    local_rank = int(os.environ['LOCAL_RANK'])
-    world_size = int(os.environ['WORLD_SIZE'])
-    main_worker(local_rank, world_size, args)
+    # 替换后的新代码
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    rank = int(os.environ.get("RANK", 0))
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+
+    args.local_rank = local_rank
+    main_worker(rank, world_size, args)
 
 
 if __name__ == '__main__':

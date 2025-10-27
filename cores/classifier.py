@@ -8,6 +8,7 @@ import numpy as np
 import onnxruntime as ort
 import torch
 import torch.optim as optim
+import torch.nn as nn
 import xgboost as xgb
 from sklearn.metrics import f1_score
 from torch.ao.quantization import get_default_qat_qconfig, QConfigMapping
@@ -19,8 +20,8 @@ from torch.utils.data import DataLoader
 
 from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset
 from cores.features_generator import HDF5Dataset
-from cores.loss import *
-from cores.nets import NetAFD
+from cores.loss import HardExampleMiningFocalLoss, F
+from cores.nets import NetAFD, NetAFDAE
 
 
 class ClassifierBase:
@@ -350,6 +351,113 @@ class ClassifierCNN(ClassifierBase):
         # result = accuracy_score(all_labels, predictions)
         result = f1_score(all_labels, predictions)
         return result
+
+
+class ClassifierCNNAE(ClassifierBase):
+    def __init__(self, args, ddp=False):
+        super().__init__()
+        self.local_rank = args.rank
+        self.num_epochs = 512
+        self.lr = 1e-4
+
+        model = NetAFDAE().to(self.local_rank)
+
+        self.model = model
+        self.optimizer = optim.Adam(self.model.parameters(), self.lr)
+
+        if args.path_ckpt is not None:
+            self._load_checkpoint_v0(args.path_ckpt)
+
+        if ddp:
+            self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
+
+        self.criterion = nn.MSELoss().to(self.local_rank)  # Reconstruction loss
+        self.features_generator = FeaturesGeneratorCNN()
+        self.rank = args.rank
+        self.save_dir = args.save_dir
+
+    def _load_checkpoint_v0(self, checkpoint_path):
+        state_dict = torch.load(checkpoint_path, map_location=f'cuda:{self.local_rank}')
+        # Handle DDP-saved models
+        if 'module.' in list(state_dict.keys())[0]:
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                name = k[7:]
+                new_state_dict[name] = v
+            state_dict = new_state_dict
+        # strict=False allows loading only encoder part if a classifier model is provided
+        self.model.load_state_dict(state_dict, strict=False)
+        logging.info(f'Loaded checkpoint from {checkpoint_path}')
+
+    def train(self, data):
+        if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
+            os.makedirs(self.save_dir)
+
+        dataset = HDF5Dataset(data['train_path'], self.features_generator.transform_sample)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+        loader = DataLoader(dataset=dataset, batch_size=1024, shuffle=False, sampler=train_sampler)
+
+        best_loss = float('inf')
+        for epoch in range(self.num_epochs):
+            epoch_start_time = time.time()
+            train_sampler.set_epoch(epoch)
+            epoch_loss = 0.0
+            num_batches = 0
+            for inputs, labels in loader:  # Labels are used to filter for normal data
+                # Filter for normal data (label == 0)
+                normal_indices = (labels.view(-1) == 0)
+                if not torch.any(normal_indices):
+                    continue
+
+                inputs_normal = inputs[normal_indices].to(self.local_rank)
+
+                reconstructions, _ = self.model(inputs_normal)
+                loss = self.criterion(reconstructions, inputs_normal)
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                epoch_loss += loss.item()
+                num_batches += 1
+
+            avg_epoch_loss = epoch_loss / num_batches if num_batches > 0 else 0
+            val_loss = self.evaluate(data['test_path'])
+            epoch_duration = time.time() - epoch_start_time
+
+            if self.rank == 0:
+                logging.info(
+                    f'Epoch [{epoch + 1}/{self.num_epochs}],'
+                    f' Train Loss: {avg_epoch_loss:.8f},'
+                    f' Validation Loss: {val_loss:.8f},'
+                    f' Time: {epoch_duration:.2f} seconds')
+
+                if val_loss < best_loss and val_loss > 0:
+                    best_loss = val_loss
+                    model_to_save = self.model.module if isinstance(self.model, DDP) else self.model
+                    _path_save = os.path.join(self.save_dir, f'ae_best_e{epoch}_loss{best_loss:.6f}.pt')
+                    torch.save(model_to_save.state_dict(), _path_save)
+                    logging.info(f'Saved new best AE model with validation loss: {best_loss:.8f} to {_path_save}')
+
+    def evaluate(self, test_path, batch_size=1024):
+        dataset = HDF5Dataset(test_path, self.features_generator.transform_sample)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+        model_to_eval = self.model.module if isinstance(self.model, DDP) else self.model
+        model_to_eval.eval()
+        total_loss, num_samples = 0.0, 0
+        with torch.no_grad():
+            for inputs, labels in loader:
+                normal_indices = (labels.view(-1) == 0)
+                if not torch.any(normal_indices): continue
+                inputs_normal = inputs[normal_indices].to(self.local_rank)
+                if inputs_normal.size(0) == 0: continue
+                reconstructions, _ = model_to_eval(inputs_normal)
+                loss = self.criterion(reconstructions, inputs_normal)
+                total_loss += loss.item() * inputs_normal.size(0)
+                num_samples += inputs_normal.size(0)
+        model_to_eval.train()
+        return total_loss / num_samples if num_samples > 0 else float('inf')
 
 
 class ClassifierONNX:
