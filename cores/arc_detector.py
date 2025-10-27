@@ -1,3 +1,5 @@
+# FILE: arc_detector.py
+
 import logging
 import os
 import random
