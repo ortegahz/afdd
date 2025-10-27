@@ -56,6 +56,12 @@ def parse_args():
         default="cuda:0",
         help="Device to run evaluation on, e.g., 'cpu' or 'cuda:0'. Defaults to 'cuda:0' if available, else 'cpu'."
     )
+    parser.add_argument(
+        '--plot_sample_index',
+        type=int,
+        default=64,
+        help="Index of a test sample to plot for reconstruction analysis. A .png file will be saved."
+    )
     return parser.parse_args()
 
 
@@ -107,7 +113,8 @@ def main():
     # 调用修改后的evaluate函数
     overall_accuracy = classifier.evaluate(
         test_path=args.test_data_path,
-        threshold=args.threshold
+        threshold=args.threshold,
+        plot_sample_index=args.plot_sample_index
     )
 
     logging.info("-" * 40)
