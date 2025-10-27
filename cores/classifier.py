@@ -444,7 +444,7 @@ class ClassifierCNNAE(ClassifierBase):
                     logging.info(
                         f'Saved new best AE model with validation accuracy: {best_accuracy:.4f} to {_path_save}')
 
-    def evaluate(self, test_path, batch_size=1024):
+    def evaluate(self, test_path, batch_size=1024, threshold=None):
         """
         在测试集上评估自编码器模型，并计算详细的准确率指标。
 
@@ -487,11 +487,15 @@ class ClassifierCNNAE(ClassifierBase):
             )
             return 0.0
 
-        # 找到区分正常和异常样本的最佳阈值
-        fpr, tpr, thresholds = roc_curve(all_labels, all_errors)
-        j_scores = tpr - fpr
-        best_threshold_idx = np.argmax(j_scores)
-        best_threshold = thresholds[best_threshold_idx]
+        if threshold is None:
+            # 自动找到区分正常和异常样本的最佳阈值
+            fpr, tpr, thresholds = roc_curve(all_labels, all_errors)
+            j_scores = tpr - fpr
+            best_threshold_idx = np.argmax(j_scores)
+            best_threshold = thresholds[best_threshold_idx]
+        else:
+            best_threshold = threshold
+            logging.info(f"Using manually specified threshold: {best_threshold}")
 
         # 基于最佳阈值进行预测
         predictions = (all_errors >= best_threshold).astype(int)
