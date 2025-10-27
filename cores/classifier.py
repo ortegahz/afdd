@@ -137,17 +137,19 @@ class ClassifierCNN(ClassifierBase):
             os.makedirs(self.save_dir)
         # dataset = self.features_generator.dataset_generate(x_train, y_train)
         dataset = HDF5Dataset(data['train_path'], self.features_generator.transform_sample)
-        train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
-        loader = DataLoader(dataset=dataset, batch_size=1024, shuffle=False, sampler=train_sampler)
+
+        is_distributed = isinstance(self.model, DDP)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None
+        loader = DataLoader(dataset=dataset, batch_size=1024, shuffle=not is_distributed, sampler=train_sampler)
+
         best_accuracy = 0.0
         for epoch in range(self.num_epochs):
             if self.qat:
                 if epoch == 3:  # 经验值，可调
                     self.model.apply(torch.ao.quantization.disable_observer)
-                # if epoch == 5:
-                #     self.model.apply(torch.ao.quantization.freeze_bn_stats)
             epoch_start_time = time.time()
-            train_sampler.set_epoch(epoch)
+            if is_distributed:
+                train_sampler.set_epoch(epoch)
             for inputs, labels in loader:
                 inputs = inputs.to(self.local_rank)
                 labels = labels.to(self.local_rank)
@@ -156,7 +158,6 @@ class ClassifierCNN(ClassifierBase):
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-                # break
             # val_accuracy = self.evaluate(x_val, y_val)
             val_accuracy = self.evaluate(data['test_path'])
             epoch_duration = time.time() - epoch_start_time
@@ -394,13 +395,16 @@ class ClassifierCNNAE(ClassifierBase):
             os.makedirs(self.save_dir)
 
         dataset = HDF5Dataset(data['train_path'], self.features_generator.transform_sample)
-        train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
-        loader = DataLoader(dataset=dataset, batch_size=1024, shuffle=False, sampler=train_sampler)
+
+        is_distributed = isinstance(self.model, DDP)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None
+        loader = DataLoader(dataset=dataset, batch_size=1024, shuffle=not is_distributed, sampler=train_sampler)
 
         best_loss = float('inf')
         for epoch in range(self.num_epochs):
             epoch_start_time = time.time()
-            train_sampler.set_epoch(epoch)
+            if is_distributed:
+                train_sampler.set_epoch(epoch)
             epoch_loss = 0.0
             num_batches = 0
             for inputs, labels in loader:  # Labels are used to filter for normal data

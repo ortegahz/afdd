@@ -20,8 +20,9 @@ from utils.utils import set_logging, svm_label2data_v1
 def parse_args():
     parser = argparse.ArgumentParser()
     # parser.add_argument('--load_dir', default='/dev/shm/afd_pm_hdf5')
+    # parser.add_argument('--save_dir', default='/home/Huangzhe/test/afdd_models_mp')
     parser.add_argument('--load_dir', default='/home/manu/tmp/')
-    parser.add_argument('--save_dir', default='/home/Huangzhe/test/afdd_models_mp')
+    parser.add_argument('--save_dir', default='/home/manu/tmp/afdd_models_mp')
     parser.add_argument('--path_save', default='/home/manu/tmp/xgb.pt')
     parser.add_argument('--path_label_train', default='/home/manu/tmp/afd_pm_train')
     # parser.add_argument('--path_label_test', default='/home/Huangzhe/test/afd_pm_test')
@@ -75,7 +76,7 @@ def _load_data(path_label, lidx=-1):
     return x, y, alpha
 
 
-def run_cnn(args):
+def run_cnn(args, is_distributed):
     logging.info(args)
     _seed = 128
     torch.manual_seed(_seed)
@@ -87,7 +88,7 @@ def run_cnn(args):
     # logging.info(f'Counter(y_test) -> {Counter(y_test)}')
     # x_train, y_train, alpha = _load_data(args.path_label_train)
     # x_test, y_test, _ = _load_data(args.path_label_test)
-    classifier = ClassifierCNN(args, ddp=True)
+    classifier = ClassifierCNN(args, ddp=is_distributed)
     _data = {
         'train_path': os.path.join(args.load_dir, 'train_data.h5'),
         'test_path': os.path.join(args.load_dir, 'test_data.h5'),
@@ -95,12 +96,12 @@ def run_cnn(args):
     classifier.train(_data)
 
 
-def run_cnn_ae(args):
+def run_cnn_ae(args, is_distributed):
     logging.info(args)
     _seed = 128
     torch.manual_seed(_seed)
 
-    classifier = ClassifierCNNAE(args, ddp=True)
+    classifier = ClassifierCNNAE(args, ddp=is_distributed)
     _data = {
         'train_path': os.path.join(args.load_dir, 'train_data.h5'),
         'test_path': os.path.join(args.load_dir, 'test_data.h5'),
@@ -129,9 +130,9 @@ def main_worker(rank, world_size, args):
     args.rank = rank
     args.world_size = world_size
     if args.model_type == 'cnn':
-        run_cnn(args)
+        run_cnn(args, is_distributed)
     elif args.model_type == 'cnn-ae':
-        run_cnn_ae(args)
+        run_cnn_ae(args, is_distributed)
 
 
 def main():
