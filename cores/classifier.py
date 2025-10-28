@@ -444,6 +444,44 @@ class ClassifierCNNAE(ClassifierBase):
                     logging.info(
                         f'Saved new best AE model with validation accuracy: {best_accuracy:.4f} to {_path_save}')
 
+    def infer(self, x, batch_size=16):
+        """
+        Performs inference using the AutoEncoder model and returns the reconstruction error for each sample.
+
+        Args:
+            x: Input data, can be a numpy array, list, or any format supported by InferenceDataset.
+            batch_size (int): The batch size for inference.
+
+        Returns:
+            np.ndarray: A 1D numpy array containing the reconstruction score (MSE) for each input sample.
+        """
+        # Use the same 'ae' transform as in training/evaluation
+        dataset = InferenceDataset(
+            x,
+            transform=self.features_generator.transform_sample_ae,
+            seq_len=self.features_generator.seq_len
+        )
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+        model_to_infer = self.model.module if isinstance(self.model, DDP) else self.model
+        model_to_infer.eval()
+
+        all_errors = []
+        with torch.no_grad():
+            for batch_x in loader:
+                batch_x = batch_x.to(self.local_rank)
+                reconstructions, _ = model_to_infer(batch_x)
+
+                # Calculate mean squared error for each sample in the batch.
+                # Shape of batch_x & reconstructions: [batch, 1, 1, seq_len]
+                # We average over dims 1, 2, and 3 to get a single scalar error score per sample.
+                errors = torch.mean((batch_x - reconstructions) ** 2, dim=(1, 2))
+                all_errors.append(errors.cpu().numpy())
+
+        model_to_infer.train()
+
+        return np.concatenate(all_errors)
+
     def evaluate(self, test_path, batch_size=1024, threshold=None, plot_positive_index=None, plot_negative_index=None):
         """
         在测试集上评估自编码器模型，并计算详细的准确率指标。
