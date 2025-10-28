@@ -118,16 +118,29 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
     @staticmethod
     def transform_sample_ae(x_sample):
         x_tensor = torch.tensor(x_sample, dtype=torch.float32)
-        x_signal = x_tensor.clone()
-        x_signal = (x_signal - 2048) / 4096
+
+        # 找到序列的最大值和最小值
+        min_val = torch.min(x_tensor)
+        max_val = torch.max(x_tensor)
+
+        # 根据最大值和最小值将数据归一化到 [-1, 1]
+        # 如果 max_val 等于 min_val，说明信号是恒定的，为避免除以零，将其归一化为0
+        if (max_val - min_val) > 0:
+            x_signal = 2 * (x_tensor - min_val) / (max_val - min_val) - 1
+        else:
+            x_signal = torch.zeros_like(x_tensor)
+
+        # 增加一个维度 (channel/batch dimension)
         x_signal = x_signal.unsqueeze(0)
 
-        # Calculate padding necessary to make length a multiple of 32
+        # --- 后续的 padding 逻辑保持不变 ---
+
+        # 计算使长度成为32的倍数所需的填充量
         current_length = x_signal.shape[-1]
         padding_required = (32 - (current_length % 32)) % 32
-        padding = (0, padding_required)  # (left_pad, right_pad)
+        padding = (0, padding_required)  # (左填充, 右填充)
 
-        # Pad the signal
+        # 填充信号
         x_signal = F.pad(x_signal, padding, "constant", 0)
 
         return x_signal

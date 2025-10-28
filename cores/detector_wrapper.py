@@ -29,7 +29,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
         self.key_pick = key_pick
         self.arc_detector = ArcDetector()
         self.dbo_type = dbo_type
-        self.svm_label_file = '/home/manu/tmp/afd'
+        self.svm_label_file = '/media/manu/ST8000DM004-2U91/tmp/afd'
         if os.path.exists(self.svm_label_file):
             os.remove(self.svm_label_file)
 
@@ -49,11 +49,11 @@ class DetectorWrapperV0(DetectorWrapperBase):
                                         cur_hf=cur_hf,
                                         cur_state_gt_arc=cur_state_gt_arc,
                                         cur_state_gt_normal=cur_state_gt_normal)
-            self.arc_detector.infer_v6(feat_sample=feat_sample)
+            # self.arc_detector.infer_v6(feat_sample=feat_sample)
             # self.arc_detector.infer_v5(feat_sample=feat_sample)  # TAG: for mcu
             # self.arc_detector.infer_v3(feat_sample=feat_sample)
             # self.arc_detector.sample()
-            # self.arc_detector.sample_ae()
+            self.arc_detector.sample_ae()
             # self.arc_detector.sample(pos_only=True)
             # self.arc_detector.sample_pos_v0()
         self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,

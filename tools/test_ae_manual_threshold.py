@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument(
         '--model_path',
         type=str,
-        default="/home/manu/tmp/afdd_models_mp/ae_best_e2186_acc0.9756.pt",
+        default="/home/manu/tmp/afdd_models_mp/ae_best_e53_acc0.9732.pt",
         help="Path to the pre-trained AutoEncoder model (.pt file)."
     )
     parser.add_argument(
@@ -66,13 +66,13 @@ def parse_args():
     plot_group.add_argument(
         '--plot_positive_index',
         type=int,
-        default=9,
+        default=None,
         help="Plot the N-th positive (anomaly) sample found. e.g., '--plot_positive_index 1' for the first one."
     )
     plot_group.add_argument(
         '--plot_negative_index',
         type=int,
-        default=None,
+        default=8,
         help="Plot the N-th negative (normal) sample found. e.g., '--plot_negative_index 5' for the fifth one."
     )
     return parser.parse_args()

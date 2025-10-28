@@ -103,7 +103,7 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v1/best_e348_b0.9867.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e472_b0.9878.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v9 - dv37/afdd_models_mp/best_e501_b0.9864.pt'):
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/ae_best_e2186_acc0.9756.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/ae_best_e53_acc0.9732.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         # self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -1106,7 +1106,7 @@ class ArcDetector:
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
         _data = _seq_pick[np.newaxis, :]
         _score = self.classifier.infer(_data, batch_size=1)
-        _score = _score[0] * 1e5
+        _score = _score[0] * 1e1 * 4
         # if _score * self.indicator_max_val > 30:
         #     print("manu")
         self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \

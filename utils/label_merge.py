@@ -78,10 +78,10 @@ def parse_args():
                             # '/media/manu/ST8000DM004-2U91/afdd/data/data_v32/data_pick/pos/afd',
                             # '/media/manu/ST8000DM004-2U91/afdd/data/data_v35/data_pick/误动作电机误报 - o/afd',
                             # '/media/manu/ST8000DM004-2U91/afdd/data/data_v37/afd',  # new
-                            "/home/manu/tmp/afd",
+                            "/media/manu/ST8000DM004-2U91/tmp/afd",
                         ])
-    # parser.add_argument('--path_out', default='/media/manu/ST8000DM004-2U91/tmp/afd_pm_train')
-    parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_train')
+    parser.add_argument('--path_out', default='/media/manu/ST8000DM004-2U91/tmp/afd_pm_train')
+    # parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_train')
     return parser.parse_args()
 
 
