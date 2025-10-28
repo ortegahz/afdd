@@ -358,7 +358,7 @@ class ClassifierCNNAE(ClassifierBase):
     def __init__(self, args, ddp=False):
         super().__init__()
         self.local_rank = args.rank
-        self.num_epochs = 512
+        self.num_epochs = 8192
         self.lr = 1e-4
 
         model = NetAFDAE().to(self.local_rank)
@@ -394,7 +394,7 @@ class ClassifierCNNAE(ClassifierBase):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
 
-        dataset = HDF5Dataset(data['train_path'], self.features_generator.transform_sample)
+        dataset = HDF5Dataset(data['train_path'], self.features_generator.transform_sample_ae)
 
         is_distributed = isinstance(self.model, DDP)
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None
@@ -458,7 +458,7 @@ class ClassifierCNNAE(ClassifierBase):
         5. 基于这些预测计算总体准确率、正例准确率（召回率）和负例准确率（特异性）。
         6. 打印详细的统计信息并返回总体准确率。
         """
-        dataset = HDF5Dataset(test_path, self.features_generator.transform_sample)
+        dataset = HDF5Dataset(test_path, self.features_generator.transform_sample_ae)
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
         model_to_eval = self.model.module if isinstance(self.model, DDP) else self.model

@@ -115,6 +115,23 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
 
         return x_signal
 
+    @staticmethod
+    def transform_sample_ae(x_sample):
+        x_tensor = torch.tensor(x_sample, dtype=torch.float32)
+        x_signal = x_tensor.clone()
+        x_signal = (x_signal - 2048) / 4096
+        x_signal = x_signal.unsqueeze(0)
+
+        # Calculate padding necessary to make length a multiple of 32
+        current_length = x_signal.shape[-1]
+        padding_required = (32 - (current_length % 32)) % 32
+        padding = (0, padding_required)  # (left_pad, right_pad)
+
+        # Pad the signal
+        x_signal = F.pad(x_signal, padding, "constant", 0)
+
+        return x_signal
+
     # @staticmethod
     # def transform_sample(x_sample):
     #     """
