@@ -316,7 +316,7 @@ class HDF5SPDataset(torch.utils.data.Dataset):
     Reads long sequences from an HDF5 file and yields random, fixed-length slices.
     """
 
-    def __init__(self, hdf5_file_path, transform, seq_len, min_delta=MIN_VAL_TH, samples_per_epoch=1024 * 64):
+    def __init__(self, hdf5_file_path, transform, seq_len, min_delta=MIN_VAL_TH * 2, samples_per_epoch=1024 * 64):
         self.hdf5_file_path = hdf5_file_path
         self.transform = transform
         self.seq_len = seq_len
@@ -362,3 +362,84 @@ class HDF5SPDataset(torch.utils.data.Dataset):
                 x_signal = self.transform(x_sample.astype(np.float32))
                 y_tensor = torch.tensor(y_label, dtype=torch.float32).view(-1)
                 return x_signal, y_tensor
+
+
+class HDF5SequentialSliceDataset(torch.utils.data.Dataset):
+    """
+    用于评估的HDF5数据集，采用确定性的顺序滑窗切片。
+    它会遍历HDF5文件中的所有长序列，并按固定的步长生成所有可能的切片。
+    """
+
+    def __init__(self, hdf5_file_path, transform, seq_len, step):
+        self.hdf5_file_path = hdf5_file_path
+        self.transform = transform
+        self.seq_len = seq_len
+        self.step = step
+        self.hdf5_file = None  # Defer file opening to __getitem__ for multiprocessing
+
+        # 预计算所有切片的位置信息
+        self.slices = []
+        with h5py.File(self.hdf5_file_path, 'r') as f:
+            self.group_keys = list(f.keys())
+            for key in self.group_keys:
+                signal_len = len(f[key]['signal'])
+                # 从0开始，以step为步长，生成所有可能的起始点
+                for start_idx in range(0, signal_len - self.seq_len + 1, self.step):
+                    # 读取切片数据以进行检查
+                    x_sample = f[key]['signal'][start_idx: start_idx + self.seq_len]
+
+                    # 检查振幅差是否大于阈值
+                    if np.max(x_sample) - np.min(x_sample) > MIN_VAL_TH * 2:
+                        # 只有当切片有效时，才将其信息添加到列表中
+                        self.slices.append((key, start_idx))
+
+    def __len__(self):
+        return len(self.slices)
+
+    def __getitem__(self, idx):
+        """
+        根据索引 (idx) 获取一个经过处理的数据样本及其标签。
+
+        Args:
+            idx (int): 需要获取的数据样本的索引。
+
+        Returns:
+            tuple: 包含两个元素的元组 (x_signal, y_tensor)
+                - x_signal (torch.Tensor): 经过变换（如归一化、填充）后的信号数据。
+                - y_tensor (torch.Tensor): 对应的标签，形状为 [1]。
+        """
+        # 为了支持PyTorch的DataLoader多进程加载，每个worker需要独立的文件句柄。
+        # 此处判断确保了文件只在需要时被打开一次（在每个worker进程的第一次调用时）。
+        if self.hdf5_file is None:
+            self.hdf5_file = h5py.File(self.hdf5_file_path, 'r')
+
+        # 1. 根据索引从预计算的切片列表中获取该切片的信息（属于哪个长序列，起始点在哪）
+        group_key, start_idx = self.slices[idx]
+
+        # 2. 计算切片的结束位置
+        end_idx = start_idx + self.seq_len
+
+        # 3. 从HDF5文件中定位到对应的长序列
+        group = self.hdf5_file[group_key]
+
+        # 4. 提取该切片对应的信号数据和标签序列
+        x_sample = group['signal'][start_idx:end_idx].astype(np.float32)
+        y_sample_slice = group['label_seq'][start_idx:end_idx]
+
+        # 5. 为整个切片确定一个单一的标签：
+        #    如果切片内的任何一个点的标签值大于0（即为故障），则整个切片的标签为1，否则为0。
+        y_label = 1 if np.any(y_sample_slice > 0) else 0
+
+        # ---- 以下是补全的部分 ----
+
+        # 6. 对提取出的信号样本应用预设的转换函数 (self.transform)。
+        #    这个函数通常负责数据归一化、填充和转换为PyTorch张量。
+        x_signal = self.transform(x_sample)
+
+        # 7. 将计算出的标量标签 (y_label) 转换为PyTorch张量。
+        #    - dtype=torch.float32 是为了与模型输出和损失函数（如BCE）的类型匹配。
+        #    - .view(-1) 将其形状从标量变为一维张量 (例如, 0 变为 tensor([0.]) )。
+        y_tensor = torch.tensor(y_label, dtype=torch.float32).view(-1)
+
+        # 8. 返回处理好的信号张量和标签张量，这是DataLoader期望的格式。
+        return x_signal, y_tensor

@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data import DataLoader
 
 from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset
-from cores.features_generator import HDF5SPDataset, HDF5Dataset
+from cores.features_generator import HDF5SPDataset, HDF5Dataset, HDF5SequentialSliceDataset
 from cores.loss import HardExampleMiningFocalLoss, F
 from cores.nets import NetAFD, NetAFDAE
 from utils.macros import MIN_VAL_TH
@@ -502,7 +502,13 @@ class ClassifierCNNAE(ClassifierBase):
         5. 基于这些预测计算总体准确率、正例准确率（召回率）和负例准确率（特异性）。
         6. 打印详细的统计信息并返回总体准确率。
         """
-        dataset = HDF5Dataset(test_path, self.features_generator.transform_sample_ae)
+        # 使用新的序贯切片数据集进行评估，确保覆盖所有数据
+        dataset = HDF5SequentialSliceDataset(
+            hdf5_file_path=test_path,
+            transform=self.features_generator.transform_sample_ae,
+            seq_len=self.features_generator.seq_len,
+            step=self.features_generator.seq_len  # step=seq_len 表示无重叠切片
+        )
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
         model_to_eval = self.model.module if isinstance(self.model, DDP) else self.model
@@ -628,7 +634,8 @@ class ClassifierCNNAE(ClassifierBase):
 
         # 基于最佳阈值进行预测
         predictions = (all_errors >= best_threshold).astype(int)
-        accuracy = accuracy_score(all_labels, predictions)
+        # 改为使用 F1-Score 作为主要的评估指标
+        f1 = f1_score(all_labels, predictions)
 
         # ==================== 计算并打印详细指标 ====================
         num_positives = np.sum(all_labels == 1)
@@ -647,14 +654,15 @@ class ClassifierCNNAE(ClassifierBase):
             logging.info(
                 f"  [Eval Stats] Negatives(0): {num_negatives} samples, Acc: {acc_negatives:.4f} | "
                 f"Positives(1): {num_positives} samples, Acc: {acc_positives:.4f} | "
-                f"Threshold: {best_threshold:.6f}"
+                f"Threshold: {best_threshold:.6f} | "
+                f"F1 score: {f1:.6f}"
             )
         # =================================================================
 
         # 在退出前确保模型切换回训练模式
         model_to_eval.train()
 
-        return accuracy
+        return f1
 
 
 class ClassifierONNX:
