@@ -29,9 +29,17 @@ class DetectorWrapperV0(DetectorWrapperBase):
         self.key_pick = key_pick
         self.arc_detector = ArcDetector()
         self.dbo_type = dbo_type
+
+        # --- Configurable saving options ---
         self.svm_label_file = '/media/manu/ST8000DM004-2U91/tmp/afd'
-        if os.path.exists(self.svm_label_file):
+        self.save_as_svm = True
+        self.h5_path = '/media/manu/ST8000DM004-2U91/tmp/afd.h5'
+
+        if self.save_as_svm and os.path.exists(self.svm_label_file):
             os.remove(self.svm_label_file)
+
+        if self.h5_path and os.path.exists(self.h5_path):
+            os.remove(self.h5_path)
 
     def _process_single(self, key, case_name, feat_sample=False):
         db_offline_single = self.db_offline.db[key]
@@ -49,11 +57,11 @@ class DetectorWrapperV0(DetectorWrapperBase):
                                         cur_hf=cur_hf,
                                         cur_state_gt_arc=cur_state_gt_arc,
                                         cur_state_gt_normal=cur_state_gt_normal)
-            # self.arc_detector.infer_v6(feat_sample=feat_sample)
+            self.arc_detector.infer_v6(feat_sample=feat_sample)
             # self.arc_detector.infer_v5(feat_sample=feat_sample)  # TAG: for mcu
             # self.arc_detector.infer_v3(feat_sample=feat_sample)
             # self.arc_detector.sample()
-            self.arc_detector.sample_ae()
+            # self.arc_detector.sample_ae()
             # self.arc_detector.sample(pos_only=True)
             # self.arc_detector.sample_pos_v0()
         self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
@@ -66,7 +74,12 @@ class DetectorWrapperV0(DetectorWrapperBase):
         #                           save_name=f'{case_name}_{key}.png', show=self.plot_show)
         # self.arc_detector.db.plot_emd(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
         #                               save_name=f'{case_name}_{key}.png', show=self.plot_show)
-        self.arc_detector.save_samples(path_save=self.svm_label_file)
+        if self.save_as_svm:
+            self.arc_detector.save_samples(path_save=self.svm_label_file)
+
+        if self.h5_path:
+            self.arc_detector.save_to_hdf5(path_save=self.h5_path)
+
         # self.arc_detector.save_seq()
         self.arc_detector.db.save()
         self.arc_detector.reset()

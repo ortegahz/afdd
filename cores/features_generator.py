@@ -1,3 +1,5 @@
+import random
+
 import h5py
 import numpy as np
 import pywt
@@ -7,7 +9,7 @@ import xgboost as xgb
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import TensorDataset
 
-from utils.macros import SAMPLE_RATE
+from utils.macros import SAMPLE_RATE, MIN_VAL_TH
 
 
 class FeaturesGeneratorBase:
@@ -306,3 +308,57 @@ class InferenceDataset(torch.utils.data.Dataset):
         # x_signal = self.transform(x_sample, self.seq_len)
         x_signal = self.transform(x_sample)
         return x_signal
+
+
+class HDF5SPDataset(torch.utils.data.Dataset):
+    """
+    HDF5 Signal Processing Dataset for dynamic slicing.
+    Reads long sequences from an HDF5 file and yields random, fixed-length slices.
+    """
+
+    def __init__(self, hdf5_file_path, transform, seq_len, min_delta=MIN_VAL_TH, samples_per_epoch=1024 * 64):
+        self.hdf5_file_path = hdf5_file_path
+        self.transform = transform
+        self.seq_len = seq_len
+        self.min_delta = min_delta
+        self.samples_per_epoch = samples_per_epoch
+
+        # H5 file handle and keys will be initialized in the first __getitem__ call
+        # This is to ensure compatibility with multi-worker DataLoader
+        self.hdf5_file = None
+        self.group_keys = None
+
+    def __len__(self):
+        # This determines the number of samples per epoch a
+        return self.samples_per_epoch
+
+    def __getitem__(self, idx):
+        # Initialize file handle if not already done (for multi-worker support)
+        if self.hdf5_file is None:
+            self.hdf5_file = h5py.File(self.hdf5_file_path, 'r')
+            self.group_keys = list(self.hdf5_file.keys())
+
+        while True:
+            # 1. Randomly select a group (long sequence)
+            random_group_name = random.choice(self.group_keys)
+            group = self.hdf5_file[random_group_name]
+            full_signal = group['signal']
+
+            # Ensure the sequence is long enough to be sliced
+            if len(full_signal) < self.seq_len:
+                continue
+
+            # 2. Randomly select a starting index for slicing
+            start_idx = random.randint(0, len(full_signal) - self.seq_len)
+            end_idx = start_idx + self.seq_len
+            x_sample = full_signal[start_idx:end_idx]
+
+            # 3. Validate the sample
+            if np.max(x_sample) - np.min(x_sample) > self.min_delta:
+                # If valid, process and return the sample and its label
+                y_sample_slice = group['label_seq'][start_idx:end_idx]
+                y_label = 1 if np.any(y_sample_slice > 0) else 0
+
+                x_signal = self.transform(x_sample.astype(np.float32))
+                y_tensor = torch.tensor(y_label, dtype=torch.float32).view(-1)
+                return x_signal, y_tensor
