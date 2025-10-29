@@ -19,9 +19,10 @@ from torch.utils.data import DataLoader
 from torch.utils.data import DataLoader
 
 from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset
-from cores.features_generator import HDF5Dataset
+from cores.features_generator import HDF5SPDataset, HDF5Dataset
 from cores.loss import HardExampleMiningFocalLoss, F
 from cores.nets import NetAFD, NetAFDAE
+from utils.macros import MIN_VAL_TH
 
 
 class ClassifierBase:
@@ -358,7 +359,7 @@ class ClassifierCNNAE(ClassifierBase):
     def __init__(self, args, ddp=False):
         super().__init__()
         self.local_rank = args.rank
-        self.num_epochs = 512
+        self.num_epochs = 256
         self.lr = 1e-5
 
         model = NetAFDAE().to(self.local_rank)
@@ -394,7 +395,12 @@ class ClassifierCNNAE(ClassifierBase):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
 
-        dataset = HDF5Dataset(data['train_path'], self.features_generator.transform_sample_ae)
+        # dataset = HDF5Dataset(data['train_path'], self.features_generator.transform_sample_ae)
+        dataset = HDF5SPDataset(
+            data['train_path'],
+            self.features_generator.transform_sample_ae,
+            seq_len=self.features_generator.seq_len,
+            min_delta=MIN_VAL_TH)
 
         is_distributed = isinstance(self.model, DDP)
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None

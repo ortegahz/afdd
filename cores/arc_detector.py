@@ -6,6 +6,7 @@ import random
 import sys
 from subprocess import *
 
+import h5py
 import numpy as np
 import onnx
 import pywt
@@ -103,7 +104,7 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v1/best_e348_b0.9867.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e472_b0.9878.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v9 - dv37/afdd_models_mp/best_e501_b0.9864.pt'):
-    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/ae_best_e53_acc0.9732.pt'):
+    def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/ae_best_e258_acc0.9735.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         # self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -192,6 +193,33 @@ class ArcDetector:
             self._update_svm_label_file(seq_pick, path_out=path_save, subset='pos')
         for seq_pick in self.samples_neg:
             self._update_svm_label_file(seq_pick, path_out=path_save, subset='neg')
+
+    def save_to_hdf5(self, path_save):
+        """
+        Saves the entire runtime data sequence to an HDF5 file.
+        Each call appends a new group to the file for each processed long sequence.
+        """
+        try:
+            with h5py.File(path_save, 'a') as f:
+                # Determine the index for the new sample group to avoid overwriting
+                idx = 0
+                while f'sample_{idx}' in f:
+                    idx += 1
+                group_name = f'sample_{idx}'
+                grp = f.create_group(group_name)
+
+                signal = self.db.db['rt'].seq_power
+                label_seq = self.db.db['rt'].seq_state_gt_arc
+
+                # Derive a single summary label for the entire sequence
+                label = 1 if np.any(np.array(label_seq) > 0) else 0
+
+                grp.create_dataset('signal', data=np.array(signal, dtype=np.float32))
+                grp.create_dataset('label_seq', data=np.array(label_seq, dtype=np.int8))
+                grp.create_dataset('label', data=label)
+                logging.info(f"Appended sequence (len={len(signal)}) to HDF5 as group '{group_name}' in '{path_save}'")
+        except Exception as e:
+            logging.error(f"Failed to save to HDF5 file {path_save}: {e}")
 
     def reset(self):
         self.last_peak_val = -1
@@ -1106,7 +1134,7 @@ class ArcDetector:
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
         _data = _seq_pick[np.newaxis, :]
         _score = self.classifier.infer(_data, batch_size=1)
-        _score = _score[0] * 1e1 * 4
+        _score = _score[0] * 1e1 * 64
         # if _score * self.indicator_max_val > 30:
         #     print("manu")
         self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
