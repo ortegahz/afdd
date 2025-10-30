@@ -12,6 +12,7 @@ import onnx
 import pywt
 import torch
 from onnxsim import simplify
+from scipy.linalg import norm
 from scipy.signal import *
 
 from cores.classifier import ClassifierCNNAE
@@ -86,6 +87,13 @@ class ArcDetector:
         self.feats_ref = []
         self.seq_power_proc_len = 0
         # self.export_onnx()
+        self.path_latent_whitelist = '/home/manu/tmp/latent_whitelist.npy'
+        if os.path.exists(self.path_latent_whitelist):
+            try:
+                self.feats_ref = np.load(self.path_latent_whitelist).tolist()
+                logging.info(f"Loaded {len(self.feats_ref)} features from whitelist '{self.path_latent_whitelist}'")
+            except Exception as e:
+                logging.error(f"Failed to load whitelist '{self.path_latent_whitelist}': {e}")
 
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v9 -  [v8] + data_v9/afdd_models/best_v4.pt'):
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v10 - [v9] + data_v8hard/afdd_models - 8gpu/afdd_models_mp_r1/best_e222_b0.8714.pt'):
@@ -220,6 +228,17 @@ class ArcDetector:
                 logging.info(f"Appended sequence (len={len(signal)}) to HDF5 as group '{group_name}' in '{path_save}'")
         except Exception as e:
             logging.error(f"Failed to save to HDF5 file {path_save}: {e}")
+
+    def save_feats_ref(self):
+        """Saves the collected reference features (whitelist) to a .npy file."""
+        if self.feats_ref:
+            try:
+                # Use unique to avoid duplicates
+                unique_feats = np.unique(np.array(self.feats_ref), axis=0)
+                np.save(self.path_latent_whitelist, unique_feats)
+                logging.info(f"Saved {len(unique_feats)} unique features to whitelist '{self.path_latent_whitelist}'")
+            except Exception as e:
+                logging.error(f"Failed to save whitelist '{self.path_latent_whitelist}': {e}")
 
     def reset(self):
         self.last_peak_val = -1
@@ -557,8 +576,8 @@ class ArcDetector:
     @staticmethod
     def _cosine_similarity(a, b):
         dot_product = np.dot(a, b)
-        norm_a = np.linalg.norm(a)
-        norm_b = np.linalg.norm(b)
+        norm_a = norm(a)
+        norm_b = norm(b)
         return dot_product / (norm_a * norm_b)
 
     def _max_cosine_similarity(self, _feat):
@@ -1134,13 +1153,28 @@ class ArcDetector:
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
         _data = _seq_pick[np.newaxis, :]
         _score, _latent = self.classifier.infer(_data, batch_size=1)
+        _latent = _latent.flatten()
         _score = _score[0] * 1e1 * 32
+
+        if not feat_sample and self.feats_ref:
+            # Check against whitelist only in inference mode
+            max_similarity, _ = self._max_cosine_similarity(_latent)
+            if max_similarity > 0.999:  # Whitelist match threshold
+                _score = 0  # Suppress score if it's a whitelist match
+                logging.debug(f"Whitelist match with similarity {max_similarity:.4f}. Suppressing score.")
+
         # if _score * self.indicator_max_val > 30:
         #     print("manu")
         self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
             [_score * self.indicator_max_val] * self.af_win_size
         _alarm_arc_th = _th_raw / self.indicator_max_val
         _is_arc = _score * self.indicator_max_val > _th_raw
+
+        if feat_sample and _is_arc:
+            # Collect feature if in sampling mode and it's a false positive (high score on a normal signal)
+            self.feats_ref.append(_latent)
+            logging.info(f'Collected a latent feature for whitelist. Total: {len(self.feats_ref)}')
+
         # self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt - 0.5 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt  # !
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc and _peak_val > self.indicator_max_val * 0.9 else self.alarm_arc_cnt  # !

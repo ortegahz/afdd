@@ -236,7 +236,7 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
     def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV0'):
         super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
 
-    def run(self, _feat_sample=False):
+    def run(self, _feat_sample=True):
         _cnt = 0
         cases_path = glob.glob(os.path.join(self.addr, '**', '*.bin'), recursive=True)
         for i, case_path in enumerate(cases_path):
@@ -253,3 +253,6 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
             for key in self.db_offline.db.keys():
                 self._process_single(key, f'{_cnt}_' + case_name, feat_sample=_feat_sample)
                 _cnt += 1
+
+        if _feat_sample:
+            self.arc_detector.save_feats_ref()
