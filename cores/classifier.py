@@ -452,14 +452,16 @@ class ClassifierCNNAE(ClassifierBase):
 
     def infer(self, x, batch_size=16):
         """
-        Performs inference using the AutoEncoder model and returns the reconstruction error for each sample.
+        Performs inference using the AutoEncoder model and returns the reconstruction error and latent vector for each sample.
 
         Args:
             x: Input data, can be a numpy array, list, or any format supported by InferenceDataset.
             batch_size (int): The batch size for inference.
 
         Returns:
-            np.ndarray: A 1D numpy array containing the reconstruction score (MSE) for each input sample.
+            tuple[np.ndarray, np.ndarray]: A tuple containing:
+                - A 1D numpy array with the reconstruction score (MSE) for each sample.
+                - A 2D numpy array with the latent vector for each sample.
         """
         # Use the same 'ae' transform as in training/evaluation
         dataset = InferenceDataset(
@@ -473,20 +475,22 @@ class ClassifierCNNAE(ClassifierBase):
         model_to_infer.eval()
 
         all_errors = []
+        all_latents = []
         with torch.no_grad():
             for batch_x in loader:
                 batch_x = batch_x.to(self.local_rank)
-                reconstructions, _ = model_to_infer(batch_x)
+                reconstructions, latents = model_to_infer(batch_x)
 
                 # Calculate mean squared error for each sample in the batch.
-                # Shape of batch_x & reconstructions: [batch, 1, 1, seq_len]
-                # We average over dims 1, 2, and 3 to get a single scalar error score per sample.
+                # Shape of batch_x & reconstructions: [batch, 1, seq_len]
+                # We average over dims 1 and 2 to get a single scalar error score per sample.
                 errors = torch.mean((batch_x - reconstructions) ** 2, dim=(1, 2))
                 all_errors.append(errors.cpu().numpy())
+                all_latents.append(latents.cpu().numpy())
 
         model_to_infer.train()
 
-        return np.concatenate(all_errors)
+        return np.concatenate(all_errors), np.concatenate(all_latents)
 
     def evaluate(self, test_path, batch_size=1024, threshold=None, plot_positive_index=None, plot_negative_index=None):
         """

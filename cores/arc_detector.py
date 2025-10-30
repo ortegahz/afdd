@@ -1133,7 +1133,7 @@ class ArcDetector:
         _seq_pick = _seq_pick_power
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
         _data = _seq_pick[np.newaxis, :]
-        _score = self.classifier.infer(_data, batch_size=1)
+        _score, _latent = self.classifier.infer(_data, batch_size=1)
         _score = _score[0] * 1e1 * 32
         # if _score * self.indicator_max_val > 30:
         #     print("manu")
