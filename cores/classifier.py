@@ -359,7 +359,7 @@ class ClassifierCNNAE(ClassifierBase):
     def __init__(self, args, ddp=False):
         super().__init__()
         self.local_rank = args.rank
-        self.num_epochs = 256
+        self.num_epochs = 8192
         self.lr = 1e-5
 
         model = NetAFDAE().to(self.local_rank)
