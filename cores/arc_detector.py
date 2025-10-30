@@ -1197,7 +1197,7 @@ class ArcDetector:
             # 2. Blacklist check (priority to trigger, unless whitelisted)
             if not is_whitelisted and self.feats_ref_blacklist:
                 max_similarity_black, _ = self._max_cosine_similarity(_latent, self.feats_ref_blacklist)
-                if max_similarity_black > 0.999:
+                if max_similarity_black > 0.9999:
                     _is_arc = True
                     _score = 1.
                     logging.debug(f"Blacklist match with similarity {max_similarity_black:.4f}. Forcing alarm.")
