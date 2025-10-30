@@ -236,7 +236,7 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
     def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV0'):
         super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
 
-    def run(self, _feat_sample=False, _blacklist_sample=True):
+    def run(self, _feat_sample=True, _blacklist_sample=False):
         _cnt = 0
         cases_path = glob.glob(os.path.join(self.addr, '**', '*.bin'), recursive=True)
         for i, case_path in enumerate(cases_path):

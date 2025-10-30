@@ -121,7 +121,7 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v1/best_e348_b0.9867.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e472_b0.9878.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v9 - dv37/afdd_models_mp/best_e501_b0.9864.pt'):
-    def _build_model(self, path_model='/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e5852_acc0.9178.pt'):
+    def _build_model(self, path_model='/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e7966_acc0.9241.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         # self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -1171,6 +1171,7 @@ class ArcDetector:
             return
         _peak_val = self.db.db['rt'].seq_power[peak_idx]
         _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
+
         _seq_pick = _seq_pick_power
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
         _data = _seq_pick[np.newaxis, :]
@@ -1178,12 +1179,20 @@ class ArcDetector:
         _latent = _latent.flatten()
         _score = _score[0] * 1e1 * 32
 
+        _th_arc = (_peak_val - self.power_mean) * 0.01
+        _cnt_arc = np.sum(np.abs(_seq_pick_power - self.power_mean) < _th_arc)
+        _scale_arc = 128
+        _cnt_arc = _cnt_arc if _cnt_arc * _scale_arc < self.indicator_max_val else self.indicator_max_val / _scale_arc
+        self.db.db['rt'].seq_state_pred_balcony[peak_idx - self.af_win_size:peak_idx] = \
+            [_cnt_arc * _scale_arc] * self.af_win_size
+        _score += _cnt_arc / 16
+
         _is_arc_by_model = _score * self.indicator_max_val > _th_raw
         _is_arc = _is_arc_by_model
 
-        is_inference_mode = not feat_sample and not blacklist_sample
+        # is_inference_mode = not feat_sample and not blacklist_sample
 
-        if is_inference_mode:
+        if True:
             # 1. Whitelist check (priority to suppress)
             is_whitelisted = False
             if self.feats_ref:
@@ -1205,16 +1214,15 @@ class ArcDetector:
         self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
             [_score * self.indicator_max_val] * self.af_win_size
 
-        if feat_sample and _is_arc_by_model:
+        if feat_sample and _is_arc and self.db.db['rt'].seq_state_gt_arc[peak_idx] < 1:
             # Collect feature for whitelist (originally for false positives)
             self.feats_ref.append(_latent)
             logging.info(f'Collected a latent feature for whitelist. Total: {len(self.feats_ref)}')
 
-        if blacklist_sample:
+        if blacklist_sample and not _is_arc and self.db.db['rt'].seq_state_gt_arc[peak_idx] > 0:
             # Collect feature for blacklist if it is a true positive
-            if self.db.db['rt'].seq_state_gt_arc[peak_idx] > 0:
-                self.feats_ref_blacklist.append(_latent)
-                logging.info(f'Collected a latent feature for blacklist. Total: {len(self.feats_ref_blacklist)}')
+            self.feats_ref_blacklist.append(_latent)
+            logging.info(f'Collected a latent feature for blacklist. Total: {len(self.feats_ref_blacklist)}')
 
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt - 0.5 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt  # !
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc and _peak_val > self.indicator_max_val * 0.9 else self.alarm_arc_cnt  # !
