@@ -94,6 +94,15 @@ class ArcDetector:
                 logging.info(f"Loaded {len(self.feats_ref)} features from whitelist '{self.path_latent_whitelist}'")
             except Exception as e:
                 logging.error(f"Failed to load whitelist '{self.path_latent_whitelist}': {e}")
+        self.path_latent_blacklist = '/home/manu/tmp/latent_blacklist.npy'
+        self.feats_ref_blacklist = []
+        if os.path.exists(self.path_latent_blacklist):
+            try:
+                self.feats_ref_blacklist = np.load(self.path_latent_blacklist).tolist()
+                logging.info(
+                    f"Loaded {len(self.feats_ref_blacklist)} features from blacklist '{self.path_latent_blacklist}'")
+            except Exception as e:
+                logging.error(f"Failed to load blacklist '{self.path_latent_blacklist}': {e}")
 
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v9 -  [v8] + data_v9/afdd_models/best_v4.pt'):
     # def _build_model(self, path_model='/home/manu/mnt/ST8000DM004-2U91/afdd/models/v10 - [v9] + data_v8hard/afdd_models - 8gpu/afdd_models_mp_r1/best_e222_b0.8714.pt'):
@@ -239,6 +248,17 @@ class ArcDetector:
                 logging.info(f"Saved {len(unique_feats)} unique features to whitelist '{self.path_latent_whitelist}'")
             except Exception as e:
                 logging.error(f"Failed to save whitelist '{self.path_latent_whitelist}': {e}")
+
+    def save_feats_ref_blacklist(self):
+        """Saves the collected reference features (blacklist) to a .npy file."""
+        if self.feats_ref_blacklist:
+            try:
+                # Use unique to avoid duplicates
+                unique_feats = np.unique(np.array(self.feats_ref_blacklist), axis=0)
+                np.save(self.path_latent_blacklist, unique_feats)
+                logging.info(f"Saved {len(unique_feats)} unique features to blacklist '{self.path_latent_blacklist}'")
+            except Exception as e:
+                logging.error(f"Failed to save blacklist '{self.path_latent_blacklist}': {e}")
 
     def reset(self):
         self.last_peak_val = -1
@@ -580,17 +600,19 @@ class ArcDetector:
         norm_b = norm(b)
         return dot_product / (norm_a * norm_b)
 
-    def _max_cosine_similarity(self, _feat):
+    def _max_cosine_similarity(self, _feat, feat_list):
         max_similarity = -1
+        if not feat_list:
+            return -1, None
         best_match = None
-        for _feat_ref in self.feats_ref:
+        for _feat_ref in feat_list:
             similarity = self._cosine_similarity(_feat, _feat_ref)
             if similarity > max_similarity:
                 max_similarity = similarity
                 best_match = _feat_ref
         return max_similarity, best_match
 
-    def infer_v3(self, feat_sample=False):
+    def infer_v3(self, feat_sample=False, blacklist_sample=False):
         _alarm_arc_cnt_th = 4
         _min_val_th = self.indicator_max_val / 2 * 0.05  # MIN_VAL_TH * 2
         _th_raw = 2048 * 1.0
@@ -743,7 +765,7 @@ class ArcDetector:
         # logging.info(f'_score --> {_score}')
         # logging.info(f'_feat --> {_feat}')
         if not feat_sample:
-            _max_similarity, _ = self._max_cosine_similarity(_feat)
+            _max_similarity, _ = self._max_cosine_similarity(_feat, self.feats_ref)
             # logging.info(f'_max_similarity --> {_max_similarity}')
             _score = 0 if _max_similarity > 0.999 else _score
         self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
@@ -1080,7 +1102,7 @@ class ArcDetector:
         #     [_integral_change_ratio * self.indicator_max_val * 64] * self.af_win_size
         self.last_peak_idx = peak_idx
 
-    def infer_v6(self, feat_sample=False):
+    def infer_v6(self, feat_sample=False, blacklist_sample=False):
         self.seq_power_proc_len += 1
         power_pick = self.db.db['rt'].seq_power[-1]
         self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
@@ -1156,26 +1178,44 @@ class ArcDetector:
         _latent = _latent.flatten()
         _score = _score[0] * 1e1 * 32
 
-        if not feat_sample and self.feats_ref:
-            # Check against whitelist only in inference mode
-            max_similarity, _ = self._max_cosine_similarity(_latent)
-            if max_similarity > 0.999:  # Whitelist match threshold
-                _score = 0  # Suppress score if it's a whitelist match
-                logging.debug(f"Whitelist match with similarity {max_similarity:.4f}. Suppressing score.")
+        _is_arc_by_model = _score * self.indicator_max_val > _th_raw
+        _is_arc = _is_arc_by_model
 
-        # if _score * self.indicator_max_val > 30:
-        #     print("manu")
+        is_inference_mode = not feat_sample and not blacklist_sample
+
+        if is_inference_mode:
+            # 1. Whitelist check (priority to suppress)
+            is_whitelisted = False
+            if self.feats_ref:
+                max_similarity_white, _ = self._max_cosine_similarity(_latent, self.feats_ref)
+                if max_similarity_white > 0.999:
+                    is_whitelisted = True
+                    _is_arc = False
+                    _score= 0.
+                    logging.debug(f"Whitelist match with similarity {max_similarity_white:.4f}. Suppressing alarm.")
+
+            # 2. Blacklist check (priority to trigger, unless whitelisted)
+            if not is_whitelisted and self.feats_ref_blacklist:
+                max_similarity_black, _ = self._max_cosine_similarity(_latent, self.feats_ref_blacklist)
+                if max_similarity_black > 0.999:
+                    _is_arc = True
+                    _score = 1.
+                    logging.debug(f"Blacklist match with similarity {max_similarity_black:.4f}. Forcing alarm.")
+
         self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
             [_score * self.indicator_max_val] * self.af_win_size
-        _alarm_arc_th = _th_raw / self.indicator_max_val
-        _is_arc = _score * self.indicator_max_val > _th_raw
 
-        if feat_sample and _is_arc:
-            # Collect feature if in sampling mode and it's a false positive (high score on a normal signal)
+        if feat_sample and _is_arc_by_model:
+            # Collect feature for whitelist (originally for false positives)
             self.feats_ref.append(_latent)
             logging.info(f'Collected a latent feature for whitelist. Total: {len(self.feats_ref)}')
 
-        # self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt
+        if blacklist_sample:
+            # Collect feature for blacklist if it is a true positive
+            if self.db.db['rt'].seq_state_gt_arc[peak_idx] > 0:
+                self.feats_ref_blacklist.append(_latent)
+                logging.info(f'Collected a latent feature for blacklist. Total: {len(self.feats_ref_blacklist)}')
+
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc else self.alarm_arc_cnt - 0.5 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt  # !
         self.alarm_arc_cnt = self.alarm_arc_cnt + 1 if _is_arc and _peak_val > self.indicator_max_val * 0.9 else self.alarm_arc_cnt  # !
         # if _is_arc and _peak_val > self.indicator_max_val * 0.9:

@@ -41,7 +41,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
         if self.save_as_h5 and self.h5_path and os.path.exists(self.h5_path):
             os.remove(self.h5_path)
 
-    def _process_single(self, key, case_name, feat_sample=False):
+    def _process_single(self, key, case_name, feat_sample=False, blacklist_sample=False):
         db_offline_single = self.db_offline.db[key]
         # for idx in range(0, db_offline_single.len, self.arc_detector.sub_sample_rate):
         for idx in range(0, db_offline_single.len):
@@ -57,7 +57,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
                                         cur_hf=cur_hf,
                                         cur_state_gt_arc=cur_state_gt_arc,
                                         cur_state_gt_normal=cur_state_gt_normal)
-            self.arc_detector.infer_v6(feat_sample=feat_sample)
+            self.arc_detector.infer_v6(feat_sample=feat_sample, blacklist_sample=blacklist_sample)
             # self.arc_detector.infer_v5(feat_sample=feat_sample)  # TAG: for mcu
             # self.arc_detector.infer_v3(feat_sample=feat_sample)
             # self.arc_detector.sample()
@@ -213,7 +213,7 @@ class DetectorWrapperV3NPY(DetectorWrapperV2):
         self.plot_show = False
         # self.arc_detector = ArcDetector()
 
-    def run(self, _feat_sample=False):
+    def run(self, _feat_sample=False, _blacklist_sample=False):
         _cnt = 0
         cases_path = glob.glob(os.path.join(self.addr, '**', '*.npy'), recursive=True)
         for i, case_path in enumerate(cases_path):
@@ -227,7 +227,7 @@ class DetectorWrapperV3NPY(DetectorWrapperV2):
             self.db_offline = DataV4(case_path)
             self.db_offline.load()
             for key in self.db_offline.db.keys():
-                self._process_single(key, f'{_cnt}_' + case_name, feat_sample=_feat_sample)
+                self._process_single(key, f'{_cnt}_' + case_name, feat_sample=_feat_sample, blacklist_sample=_blacklist_sample)
                 _cnt += 1
 
 
@@ -236,7 +236,7 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
     def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV0'):
         super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
 
-    def run(self, _feat_sample=True):
+    def run(self, _feat_sample=False, _blacklist_sample=True):
         _cnt = 0
         cases_path = glob.glob(os.path.join(self.addr, '**', '*.bin'), recursive=True)
         for i, case_path in enumerate(cases_path):
@@ -251,8 +251,11 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
             self.db_offline = eval(self.dbo_type)(case_path)
             self.db_offline.load()
             for key in self.db_offline.db.keys():
-                self._process_single(key, f'{_cnt}_' + case_name, feat_sample=_feat_sample)
+                self._process_single(key, f'{_cnt}_' + case_name, feat_sample=_feat_sample,
+                                     blacklist_sample=_blacklist_sample)
                 _cnt += 1
 
         if _feat_sample:
             self.arc_detector.save_feats_ref()
+        if _blacklist_sample:
+            self.arc_detector.save_feats_ref_blacklist()
