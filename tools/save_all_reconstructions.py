@@ -3,6 +3,7 @@
 import argparse
 import logging
 import os
+import shutil
 import sys
 
 import torch
@@ -13,7 +14,7 @@ from tqdm import tqdm
 # 假设此脚本位于项目根目录，或者项目根目录已添加到 PYTHONPATH
 try:
     from cores.classifier import ClassifierCNNAE
-    from cores.features_generator import HDF5Dataset
+    from cores.features_generator import HDF5Dataset, HDF5SequentialSliceDataset
 except ImportError:
     # 一个常见的回退方法：将父目录添加到Python路径
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -46,7 +47,7 @@ def parse_args():
     parser.add_argument(
         '--model_path',
         type=str,
-        default="/home/manu/tmp/afdd_models_mp/ae_best_e53_acc0.9732.pt",
+        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e5852_acc0.9178.pt",
         help="预训练的AutoEncoder模型 (.pt 文件) 的路径。"
     )
     parser.add_argument(
@@ -131,6 +132,9 @@ def main():
     device = torch.device(args.device if torch.cuda.is_available() and 'cuda' in args.device else "cpu")
     logging.info(f"Using device: {device}")
 
+    if os.path.exists(args.output_dir):
+        shutil.rmtree(args.output_dir)
+
     pos_dir = os.path.join(args.output_dir, 'positive')
     neg_dir = os.path.join(args.output_dir, 'negative')
     os.makedirs(pos_dir, exist_ok=True)
@@ -156,7 +160,13 @@ def main():
         return
 
     # --- 3. 准备数据集 ---
-    dataset = HDF5Dataset(args.test_data_path, transform=classifier.features_generator.transform_sample_ae)
+    # dataset = HDF5SequentialSliceDataset(args.test_data_path, transform=classifier.features_generator.transform_sample_ae)
+    dataset = HDF5SequentialSliceDataset(
+        hdf5_file_path=args.test_data_path,
+        transform=classifier.features_generator.transform_sample_ae,
+        seq_len=classifier.features_generator.seq_len,
+        step=classifier.features_generator.seq_len  # step=seq_len 表示无重叠切片
+    )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     logging.info(f"已加载数据集，包含 {len(dataset)} 个样本。")
 
