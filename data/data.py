@@ -1,3 +1,5 @@
+# FILE: data.py
+
 import glob
 import logging
 import os
@@ -297,6 +299,7 @@ class DataV6(DataV4):
         ch_a, ch_b = self.parse_bin()  # 解析得到两路
         # =========== 根据实际情况挑一条或者两条写入 db ===========
         self.db[_key].seq_power = ch_a.tolist()  # 例如把 A 通道当成功率
+        self.db[_key].seq_power_voltage = ch_b.tolist()
         self.db[_key].len = len(ch_a)
         self.db[_key].seq_hf = np.array([1] * self.db[_key].len)
         self.db[_key].seq_state_arc = np.array([0] * self.db[_key].len)
@@ -317,6 +320,7 @@ class DataRT(DataBase):
     @dataclass
     class Signals:
         seq_power: list = field(default_factory=list)
+        seq_power_voltage: list = field(default_factory=list)
         seq_power_ss: list = field(default_factory=list)
         seq_hf: list = field(default_factory=list)
         seq_filtered: list = field(default_factory=list)
@@ -343,8 +347,9 @@ class DataRT(DataBase):
         self.db['rt'] = self.Signals()
         self.wavelet_max_level = wavelet_max_level
 
-    def update(self, cur_power, cur_hf=0, cur_state_gt_arc=0, cur_state_gt_normal=0):
+    def update(self, cur_power, cur_hf=0, cur_state_gt_arc=0, cur_state_gt_normal=0, cur_power_voltage=0):
         self.db['rt'].seq_power.append(cur_power)
+        self.db['rt'].seq_power_voltage.append(cur_power_voltage)
         self.db['rt'].seq_hf.append(cur_hf)
         self.db['rt'].seq_filtered.append(0)
         self.db['rt'].seq_filter_envelope.append(0)
@@ -402,11 +407,20 @@ class DataRT(DataBase):
         info_pred_peaks = self.db[key].info_pred_peaks
         info_eval_peaks = self.db[key].info_eval_peaks
         info_af_scores = self.db[key].info_af_scores
+        seq_power_voltage = self.db[key].seq_power_voltage
         time_stamps = np.array(range(seq_len))
-        plt.subplot(self.wavelet_max_level + 1, 1, 1)
+
+        n_subplots = self.wavelet_max_level + 1
+        voltage_plot_available = len(seq_power_voltage) == seq_len and np.any(np.array(seq_power_voltage) != 0)
+
+        # if voltage_plot_available:
+        #     n_subplots += 1
+
+        plt.subplot(n_subplots, 1, 1)
         plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
         plt.plot(time_stamps, np.array(seq_state_pred_balcony).astype(float), label='seq_state_pred_balcony')
         plt.plot(time_stamps, np.array(seq_state_pred_classifier).astype(float), label='seq_state_pred_classifier')
+
         plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred', color='red')
         plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
@@ -429,7 +443,7 @@ class DataRT(DataBase):
         plt.ylim(-1024, 4096 * 2)
         # plt.ylim(0, 4096)
         plt.legend()
-        plt.subplot(self.wavelet_max_level + 1, 1, 2)
+        plt.subplot(n_subplots, 1, 2)
         plt.plot(time_stamps, np.array(seq_filtered).astype(float), label='seq_filtered')
         plt.plot(time_stamps, np.array(seq_hf).astype(float), label='seq_hf')
         plt.plot(time_stamps, np.array(seq_filter_envelope).astype(float), label='seq_filter_envelope')
@@ -447,12 +461,21 @@ class DataRT(DataBase):
         seq_wt_power_bg = np.array(self.db[key].seq_wt_power_bg)
         seq_wt_power_pioneer = np.array(self.db[key].seq_wt_power_pioneer)
         for i in range(self.wavelet_max_level):
-            plt.subplot(self.wavelet_max_level + 1, 1, i + 2)
+            plt.subplot(n_subplots, 1, i + 2)
             plt.plot(seq_wavelet[:, i], label=f'level {i + 1} [{self.wavelet_max_level}]')
             plt.plot(seq_wt_power_pioneer[:, i], label=f'seq_wt_power_pioneer')
             plt.plot(seq_wt_power_bg[:, i], label=f'seq_wt_power_bg')
             plt.xlim(0, seq_len)
             plt.legend()
+
+        if voltage_plot_available:
+            plt.subplot(n_subplots, 1, n_subplots)
+            plt.plot(time_stamps, np.array(seq_power_voltage).astype(float), label='voltage')
+            plt.xlim(0, seq_len)
+            plt.legend()
+
+        plt.ylim(-1024, 4096 * 2)
+
         plt.tight_layout()
         plt.title(save_name)
         mng = plt.get_current_fig_manager()

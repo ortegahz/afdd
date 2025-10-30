@@ -53,10 +53,12 @@ class DetectorWrapperV0(DetectorWrapperBase):
             cur_hf = db_offline_single.seq_hf[idx]
             cur_state_gt_arc = db_offline_single.seq_state_arc[idx]
             cur_state_gt_normal = db_offline_single.seq_state_normal[idx]
+            cur_power_voltage = db_offline_single.seq_power_voltage[idx]
             self.arc_detector.db.update(cur_power=cur_power,
                                         cur_hf=cur_hf,
                                         cur_state_gt_arc=cur_state_gt_arc,
-                                        cur_state_gt_normal=cur_state_gt_normal)
+                                        cur_state_gt_normal=cur_state_gt_normal,
+                                        cur_power_voltage=cur_power_voltage)
             self.arc_detector.infer_v6(feat_sample=feat_sample, blacklist_sample=blacklist_sample)
             # self.arc_detector.infer_v5(feat_sample=feat_sample)  # TAG: for mcu
             # self.arc_detector.infer_v3(feat_sample=feat_sample)
