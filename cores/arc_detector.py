@@ -211,7 +211,7 @@ class ArcDetector:
         for seq_pick in self.samples_neg:
             self._update_svm_label_file(seq_pick, path_out=path_save, subset='neg')
 
-    def save_to_hdf5(self, path_save, save_voltage=True):
+    def save_to_hdf5(self, path_save, save_voltage=False):
         """
         Saves the entire runtime data sequence to an HDF5 file.
         Each call appends a new group to the file for each processed long sequence.
