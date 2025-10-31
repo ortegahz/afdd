@@ -1149,31 +1149,25 @@ class ArcDetector:
                         [self.indicator_max_val * _alarm_indicate_scale] * self.af_win_size
             self.alarm_arc_idx_s, self.alarm_arc_idx_e = -1, -1
 
-        # power_pick = self.db.db['rt'].seq_power[-1]
-        # if self.db.db['rt'].seq_len == 458:
-        #     print("manu")
-        # self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
-        #     else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
-        # self.db.db['rt'].seq_power_mean[-1] = self.power_mean
-        peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size,
-                                          peak_th=self.power_mean + _min_val_th)
-        peak_idx = self.db.db['rt'].seq_len - self.peak_eval_win_size // 2 if peak_idx_norm > 0 else -1
-        # if peak_idx < 0 or peak_idx - self.last_peak_idx < self.af_win_size // 1.5:  # seq filter
-        if peak_idx < 0:  # seq filter
-            # self.alarm_overload_cnt = self.alarm_overload_cnt - 0.0001 if self.alarm_overload_cnt > 0 else self.alarm_overload_cnt
-            # self.alarm_lower_cnt = self.alarm_lower_cnt - 0.0001 if self.alarm_lower_cnt > 0 else self.alarm_lower_cnt
+        peak_idx = self.db.db['rt'].seq_len
+        _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
+        _peak_val = np.max(_seq_pick_power)  # Use max of window as peak value
+
+        fixed_interval = 512
+        if (self.db.db['rt'].seq_len % fixed_interval != 0 or
+                np.max(_seq_pick_power) - np.min(_seq_pick_power) <= MIN_VAL_TH * 2):
+            # Not a trigger point, decay counters and return
             self.alarm_arc_cnt = self.alarm_arc_cnt - 0.0001 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt
             self.alarm_arc_cnt = self.alarm_arc_cnt + 0.0001 if self.alarm_arc_cnt < 0 else self.alarm_arc_cnt
             self.alarm_idle_cnt = self.alarm_idle_cnt - 0.0005 if self.alarm_idle_cnt > 0 else self.alarm_idle_cnt
-            self.peak_miss_cnt += 1
+            self.peak_miss_cnt += 1  # Maintain idle detection logic
             return
+
+        # It's a trigger point, process the window
         self.ini_peak_cnt += 1
-        self.peak_anchor_idx = peak_idx
-        self.peak_miss_cnt = 0
+        self.peak_miss_cnt = 0  # Reset idle counter
         if self.ini_peak_cnt < 2:  # !
             return
-        _peak_val = self.db.db['rt'].seq_power[peak_idx]
-        _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
 
         _seq_pick = _seq_pick_power
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
@@ -1182,13 +1176,13 @@ class ArcDetector:
         _latent = _latent.flatten()
         _score = _score[0] * 1e1 * 128  # 32 for current signal
 
-        _th_arc = (_peak_val - self.power_mean) * 0.01
-        _cnt_arc = np.sum(np.abs(_seq_pick_power - self.power_mean) < _th_arc)
-        _scale_arc = 128
-        _cnt_arc = _cnt_arc if _cnt_arc * _scale_arc < self.indicator_max_val else self.indicator_max_val / _scale_arc
-        self.db.db['rt'].seq_state_pred_balcony[peak_idx - self.af_win_size:peak_idx] = \
-            [_cnt_arc * _scale_arc] * self.af_win_size
-        _score += _cnt_arc / 16
+        # _th_arc = (_peak_val - self.power_mean) * 0.01
+        # _cnt_arc = np.sum(np.abs(_seq_pick_power - self.power_mean) < _th_arc)
+        # _scale_arc = 128
+        # _cnt_arc = _cnt_arc if _cnt_arc * _scale_arc < self.indicator_max_val else self.indicator_max_val / _scale_arc
+        # self.db.db['rt'].seq_state_pred_balcony[peak_idx - self.af_win_size:peak_idx] = \
+        #     [_cnt_arc * _scale_arc] * self.af_win_size
+        # _score += _cnt_arc / 16
 
         _is_arc_by_model = _score * self.indicator_max_val > _th_raw
         _is_arc = _is_arc_by_model
@@ -1217,12 +1211,12 @@ class ArcDetector:
         self.db.db['rt'].seq_state_pred_classifier[peak_idx - self.af_win_size:peak_idx] = \
             [_score * self.indicator_max_val] * self.af_win_size
 
-        if feat_sample and _is_arc and self.db.db['rt'].seq_state_gt_arc[peak_idx] < 1:
+        if feat_sample and _is_arc and self.db.db['rt'].seq_state_gt_arc[peak_idx - 1] < 1:
             # Collect feature for whitelist (originally for false positives)
             self.feats_ref.append(_latent)
             logging.info(f'Collected a latent feature for whitelist. Total: {len(self.feats_ref)}')
 
-        if blacklist_sample and not _is_arc and self.db.db['rt'].seq_state_gt_arc[peak_idx] > 0:
+        if blacklist_sample and not _is_arc and self.db.db['rt'].seq_state_gt_arc[peak_idx - 1] > 0:
             # Collect feature for blacklist if it is a true positive
             self.feats_ref_blacklist.append(_latent)
             logging.info(f'Collected a latent feature for blacklist. Total: {len(self.feats_ref_blacklist)}')
