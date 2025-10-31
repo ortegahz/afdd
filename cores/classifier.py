@@ -391,7 +391,7 @@ class ClassifierCNNAE(ClassifierBase):
         self.model.load_state_dict(state_dict, strict=False)
         logging.info(f'Loaded checkpoint from {checkpoint_path}')
 
-    def train(self, data):
+    def train(self, data, loss_ckp=True):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
 
@@ -432,7 +432,7 @@ class ClassifierCNNAE(ClassifierBase):
                 num_batches += 1
 
             avg_epoch_loss = epoch_loss / num_batches if num_batches > 0 else 0
-            val_accuracy = self.evaluate(data['test_path'])
+            val_accuracy = self.evaluate(data['test_path']) if not loss_ckp else 1 - avg_epoch_loss
             epoch_duration = time.time() - epoch_start_time
 
             if self.rank == 0:
