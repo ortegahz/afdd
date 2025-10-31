@@ -83,7 +83,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
             self.arc_detector.save_to_hdf5(path_save=self.h5_path)
 
         # self.arc_detector.save_seq()
-        self.arc_detector.db.save()
+        # self.arc_detector.db.save()
         self.arc_detector.reset()
 
     def run(self):

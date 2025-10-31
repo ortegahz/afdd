@@ -121,7 +121,7 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v1/best_e348_b0.9867.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e472_b0.9878.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v9 - dv37/afdd_models_mp/best_e501_b0.9864.pt'):
-    def _build_model(self, path_model='/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e7966_acc0.9241.pt'):
+    def _build_model(self, path_model='/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e7621_acc0.8451.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         # self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -211,7 +211,7 @@ class ArcDetector:
         for seq_pick in self.samples_neg:
             self._update_svm_label_file(seq_pick, path_out=path_save, subset='neg')
 
-    def save_to_hdf5(self, path_save):
+    def save_to_hdf5(self, path_save, save_voltage=True):
         """
         Saves the entire runtime data sequence to an HDF5 file.
         Each call appends a new group to the file for each processed long sequence.
@@ -225,7 +225,7 @@ class ArcDetector:
                 group_name = f'sample_{idx}'
                 grp = f.create_group(group_name)
 
-                signal = self.db.db['rt'].seq_power
+                signal = self.db.db['rt'].seq_power if not save_voltage else self.db.db['rt'].seq_power_voltage
                 label_seq = self.db.db['rt'].seq_state_gt_arc
 
                 # Derive a single summary label for the entire sequence
@@ -1177,7 +1177,7 @@ class ArcDetector:
         _data = _seq_pick[np.newaxis, :]
         _score, _latent = self.classifier.infer(_data, batch_size=1)
         _latent = _latent.flatten()
-        _score = _score[0] * 1e1 * 32
+        _score = _score[0] * 1e1 * 128  # 32 for current signal
 
         _th_arc = (_peak_val - self.power_mean) * 0.01
         _cnt_arc = np.sum(np.abs(_seq_pick_power - self.power_mean) < _th_arc)
@@ -1200,7 +1200,7 @@ class ArcDetector:
                 if max_similarity_white > 0.999:
                     is_whitelisted = True
                     _is_arc = False
-                    _score= 0.
+                    _score = 0.
                     logging.debug(f"Whitelist match with similarity {max_similarity_white:.4f}. Suppressing alarm.")
 
             # 2. Blacklist check (priority to trigger, unless whitelisted)
