@@ -41,7 +41,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
         if self.save_as_h5 and self.h5_path and os.path.exists(self.h5_path):
             os.remove(self.h5_path)
 
-    def _process_single(self, key, case_name, feat_sample=False, blacklist_sample=False):
+    def _process_single(self, key, case_name, feat_sample=False, blacklist_sample=False, is_infer=True):
         db_offline_single = self.db_offline.db[key]
         # for idx in range(0, db_offline_single.len, self.arc_detector.sub_sample_rate):
         for idx in range(0, db_offline_single.len):
@@ -59,23 +59,25 @@ class DetectorWrapperV0(DetectorWrapperBase):
                                         cur_state_gt_arc=cur_state_gt_arc,
                                         cur_state_gt_normal=cur_state_gt_normal,
                                         cur_power_voltage=cur_power_voltage)
-            self.arc_detector.infer_v6(feat_sample=feat_sample, blacklist_sample=blacklist_sample)
-            # self.arc_detector.infer_v5(feat_sample=feat_sample)  # TAG: for mcu
-            # self.arc_detector.infer_v3(feat_sample=feat_sample)
-            # self.arc_detector.sample()
-            # self.arc_detector.sample_ae()
-            # self.arc_detector.sample(pos_only=True)
-            # self.arc_detector.sample_pos_v0()
-        self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
-                                  save_name=f'{case_name}.png', show=self.plot_show)
-        # self.arc_detector.db.plot_arc(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
-        #                               save_name=f'{case_name}.png', show=self.plot_show)
-        # self.arc_detector.db.plot_arc_neg(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
-        #                                   save_name=f'{case_name}.png', show=self.plot_show)
-        # self.arc_detector.db.plot_cwt(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
-        #                           save_name=f'{case_name}_{key}.png', show=self.plot_show)
-        # self.arc_detector.db.plot_emd(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
-        #                               save_name=f'{case_name}_{key}.png', show=self.plot_show)
+            if is_infer:
+                self.arc_detector.infer_v6(feat_sample=feat_sample, blacklist_sample=blacklist_sample)
+                # self.arc_detector.infer_v5(feat_sample=feat_sample)  # TAG: for mcu
+                # self.arc_detector.infer_v3(feat_sample=feat_sample)
+                # self.arc_detector.sample()
+                # self.arc_detector.sample_ae()
+                # self.arc_detector.sample(pos_only=True)
+                # self.arc_detector.sample_pos_v0()
+        if is_infer:
+            self.arc_detector.db.plot(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
+                                      save_name=f'{case_name}.png', show=self.plot_show)
+            # self.arc_detector.db.plot_arc(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
+            #                               save_name=f'{case_name}.png', show=self.plot_show)
+            # self.arc_detector.db.plot_arc_neg(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
+            #                                   save_name=f'{case_name}.png', show=self.plot_show)
+            # self.arc_detector.db.plot_cwt(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
+            #                           save_name=f'{case_name}_{key}.png', show=self.plot_show)
+            # self.arc_detector.db.plot_emd(pause_time_s=self.pause_time_s, dir_save=self.dir_save,
+            #                               save_name=f'{case_name}_{key}.png', show=self.plot_show)
         if self.save_as_svm:
             self.arc_detector.save_samples(path_save=self.svm_label_file)
 
@@ -254,7 +256,7 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
             self.db_offline.load()
             for key in self.db_offline.db.keys():
                 self._process_single(key, f'{_cnt}_' + case_name, feat_sample=_feat_sample,
-                                     blacklist_sample=_blacklist_sample)
+                                     blacklist_sample=_blacklist_sample, is_infer=False)
                 _cnt += 1
 
         if _feat_sample:
