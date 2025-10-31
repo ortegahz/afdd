@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader
 from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset
 from cores.features_generator import HDF5SPDataset, HDF5Dataset, HDF5SequentialSliceDataset
 from cores.loss import HardExampleMiningFocalLoss, F
-from cores.nets import NetAFD, NetAFDAE
+from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet
 from utils.macros import MIN_VAL_TH
 
 
@@ -362,7 +362,8 @@ class ClassifierCNNAE(ClassifierBase):
         self.num_epochs = 8192
         self.lr = 1e-5
 
-        model = NetAFDAE().to(self.local_rank)
+        # model = NetAFDAE().to(self.local_rank)
+        model = NetAFDAE_UNet().to(self.local_rank)
 
         self.model = model
         self.optimizer = optim.Adam(self.model.parameters(), self.lr)
@@ -373,7 +374,8 @@ class ClassifierCNNAE(ClassifierBase):
         if ddp:
             self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
 
-        self.criterion = nn.MSELoss().to(self.local_rank)  # Reconstruction loss
+        # self.criterion = nn.MSELoss().to(self.local_rank)  # Reconstruction loss
+        self.criterion = nn.L1Loss().to(self.local_rank)  # Reconstruction loss
         self.features_generator = FeaturesGeneratorCNN()
         self.rank = args.rank
         self.save_dir = args.save_dir

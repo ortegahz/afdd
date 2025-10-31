@@ -47,7 +47,7 @@ def parse_args():
     parser.add_argument(
         '--model_path',
         type=str,
-        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e257_acc0.7826.pt",
+        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e350_acc0.9909.pt",
         help="预训练的AutoEncoder模型 (.pt 文件) 的路径。"
     )
     parser.add_argument(

@@ -1,7 +1,9 @@
 # FILE: nets.py
 
 import time
+from typing import Tuple
 
+import torch
 import torch.nn as nn
 from thop import profile
 
@@ -43,6 +45,176 @@ class NetAFDV0(nn.Module):
         x = self.fc2(x)
 
         return x, feat
+
+
+class MultiScaleConvBlock(nn.Module):
+    """
+    多尺度卷积模块，并行使用不同大小的卷积核来捕捉不同范围的特征。
+    - 使用 1x1 卷积作为瓶颈层来降低计算成本。
+    - 拼接所有分支的输出并通过一个 1x1 卷积进行特征融合。
+    """
+
+    def __init__(self, in_c, out_c, bottleneck_ratio=0.25):
+        super().__init__()
+        bottleneck_c = max(1, int(in_c * bottleneck_ratio))
+        k_sizes = [3, 5, 7]
+
+        # 瓶颈层，用于降低后续多尺度卷积的计算量
+        self.bottleneck = nn.Sequential(
+            nn.Conv1d(in_c, bottleneck_c, kernel_size=1, bias=False),
+            nn.BatchNorm1d(bottleneck_c),
+            nn.ReLU(inplace=True)
+        )
+
+        # 并行的多尺度卷积分支
+        self.branches = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv1d(bottleneck_c, bottleneck_c, kernel_size=k, padding=(k - 1) // 2, bias=False),
+                nn.BatchNorm1d(bottleneck_c),
+                nn.ReLU(inplace=True)
+            ) for k in k_sizes
+        ])
+
+        # 特征融合层
+        self.merge = nn.Sequential(
+            nn.Conv1d(bottleneck_c * len(k_sizes), out_c, kernel_size=1, bias=False),
+            nn.BatchNorm1d(out_c)
+        )
+
+        # 残差连接的捷径，确保输入输出通道数和维度一致
+        self.shortcut = nn.Conv1d(in_c, out_c, kernel_size=1) if in_c != out_c else nn.Identity()
+
+    def forward(self, x):
+        shortcut_x = self.shortcut(x)
+        x = self.bottleneck(x)
+        branch_outputs = [branch(x) for branch in self.branches]
+        x = torch.cat(branch_outputs, dim=1)
+        x = self.merge(x)
+        return F.relu(x + shortcut_x)
+
+
+class ResidualBlock(nn.Module):
+    """
+    标准的残差块，包含两个卷积层和一个捷径连接。
+    """
+
+    def __init__(self, in_c, out_c, stride=1):
+        super().__init__()
+        self.conv_block = nn.Sequential(
+            nn.Conv1d(in_c, out_c, kernel_size=3, stride=stride, padding=1, bias=False),
+            nn.BatchNorm1d(out_c),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(out_c, out_c, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm1d(out_c)
+        )
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_c != out_c:
+            self.shortcut = nn.Sequential(
+                nn.Conv1d(in_c, out_c, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm1d(out_c)
+            )
+
+    def forward(self, x):
+        return F.relu(self.conv_block(x) + self.shortcut(x))
+
+
+class UpBlock(nn.Module):
+    """
+    解码器中的上采样模块 (U-Net 风格)。
+    - 使用 Upsample + Conv 代替转置卷积，减少伪影。
+    - 接收来自解码器下一层和编码器对应层的 skip connection 输入。
+    """
+
+    def __init__(self, in_c, skip_c, out_c):
+        super().__init__()
+        # 上采样，并将通道数减半
+        self.up = nn.Upsample(scale_factor=2, mode='nearest')
+        # 拼接 skip connection 后进行卷积
+        self.conv = ResidualBlock(in_c + skip_c, out_c)
+
+    def forward(self, x, skip_x):
+        x = self.up(x)
+        x = torch.cat([skip_x, x], dim=1)
+        return self.conv(x)
+
+
+class NetAFDAE_UNet(nn.Module):
+    """
+    一个增强版的自编码器，集成了以下特性以提升重构精度：
+    1.  **多尺度卷积 (Multi-scale Convolutions)**: 在编码器初期捕捉不同尺度的时序特征。
+    2.  **残差连接 (Residual Connections)**: 在编码器和解码器中使用残差块，缓解梯度消失，保留信息。
+    3.  **U-Net 风格的跳转连接 (Skip Connections)**: 将编码器的浅层特征直接传递给解码器，帮助恢复高频细节。
+    4.  **上采样+卷积 (Upsample + Conv)**: 在解码器中使用，以减少转置卷积可能带来的棋盘格效应。
+    """
+
+    def __init__(self, latent_dim=128):
+        super().__init__()
+        _channel_in = int(SAMPLE_RATE / 50)
+        in_len = ((_channel_in // 32) + 1) * 32
+        assert in_len == 448
+
+        # --- 编码器 (Encoder) ---
+        # 初始多尺度卷积层
+        self.in_conv = MultiScaleConvBlock(1, 16)  # 448 -> 448
+        # 下采样块
+        self.down1 = self._make_encoder_stage(16, 32)  # 448 -> 224
+        self.down2 = self._make_encoder_stage(32, 64)  # 224 -> 112
+        self.down3 = self._make_encoder_stage(64, 128)  # 112 -> 56
+        self.down4 = self._make_encoder_stage(128, 256)  # 56  -> 28
+
+        # --- 瓶颈层 (Bottleneck) ---
+        self.bottleneck_conv = self._make_encoder_stage(256, 512)  # 28 -> 14
+        final_seq_len = in_len // 32  # 448 / 32 = 14
+        self.encoder_fc = nn.Linear(512 * final_seq_len, latent_dim)
+
+        # --- 解码器 (Decoder) ---
+        self.decoder_fc = nn.Linear(latent_dim, 512 * final_seq_len)
+        self.unflatten = lambda x: x.view(-1, 512, final_seq_len)
+
+        # 上采样块
+        self.up1 = UpBlock(512, 256, 256)  # 14 -> 28
+        self.up2 = UpBlock(256, 128, 128)  # 28 -> 56
+        self.up3 = UpBlock(128, 64, 64)  # 56 -> 112
+        self.up4 = UpBlock(64, 32, 32)  # 112 -> 224
+        self.up5 = UpBlock(32, 16, 16)  # 224 -> 448
+
+        # 输出层，将特征图映射回单通道信号
+        self.out_conv = nn.Conv1d(16, 1, kernel_size=1)
+
+    def _make_encoder_stage(self, in_c, out_c):
+        return nn.Sequential(
+            nn.MaxPool1d(2),
+            ResidualBlock(in_c, out_c)
+        )
+
+    def encode(self, x):
+        s1 = self.in_conv(x)
+        s2 = self.down1(s1)
+        s3 = self.down2(s2)
+        s4 = self.down3(s3)
+        s5 = self.down4(s4)
+        bottleneck = self.bottleneck_conv(s5)
+
+        z = self.encoder_fc(bottleneck.flatten(1))
+        return z, [s1, s2, s3, s4, s5]
+
+    def decode(self, z, skips):
+        s1, s2, s3, s4, s5 = skips
+        x = self.decoder_fc(z)
+        x = self.unflatten(x)
+
+        x = self.up1(x, s5)
+        x = self.up2(x, s4)
+        x = self.up3(x, s3)
+        x = self.up4(x, s2)
+        x = self.up5(x, s1)
+
+        return self.out_conv(x)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        z, skips = self.encode(x)
+        reconstructed_x = self.decode(z, skips)
+        return reconstructed_x, z
 
 
 import torch.nn as nn
