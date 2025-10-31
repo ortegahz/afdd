@@ -410,7 +410,7 @@ class DataRT(DataBase):
         seq_power_voltage = self.db[key].seq_power_voltage
         time_stamps = np.array(range(seq_len))
 
-        n_subplots = self.wavelet_max_level + 1
+        n_subplots = 2  # self.wavelet_max_level + 1
         voltage_plot_available = len(seq_power_voltage) == seq_len and np.any(np.array(seq_power_voltage) != 0)
 
         # if voltage_plot_available:
@@ -420,7 +420,6 @@ class DataRT(DataBase):
         plt.plot(time_stamps, np.array(seq_power).astype(float), label='power')
         plt.plot(time_stamps, np.array(seq_state_pred_balcony).astype(float), label='seq_state_pred_balcony')
         plt.plot(time_stamps, np.array(seq_state_pred_classifier).astype(float), label='seq_state_pred_classifier')
-
         plt.plot(time_stamps, np.array(seq_state_pred_arc).astype(float), label='state_arc_pred', color='red')
         plt.plot(time_stamps, np.array(seq_state_arc).astype(float), label='state_arc')
         plt.plot(time_stamps, np.array(seq_state_normal).astype(float), label='state_normal')
@@ -443,13 +442,13 @@ class DataRT(DataBase):
         plt.ylim(-1024, 4096 * 2)
         # plt.ylim(0, 4096)
         plt.legend()
-        plt.subplot(n_subplots, 1, 2)
-        plt.plot(time_stamps, np.array(seq_filtered).astype(float), label='seq_filtered')
-        plt.plot(time_stamps, np.array(seq_hf).astype(float), label='seq_hf')
-        plt.plot(time_stamps, np.array(seq_filter_envelope).astype(float), label='seq_filter_envelope')
-        plt.xlim(0, seq_len)
-        plt.ylim(0, 16)
-        plt.legend()
+
+        # plt.subplot(n_subplots, 1, 1)
+        # plt.plot(time_stamps, np.array(seq_filtered).astype(float), label='seq_filtered')
+        # plt.plot(time_stamps, np.array(seq_hf).astype(float), label='seq_hf')
+        # plt.plot(time_stamps, np.array(seq_filter_envelope).astype(float), label='seq_filter_envelope')
+        # plt.xlim(0, seq_len)
+        # plt.legend()
         # wavelet, max_level = 'sym2', 4
         # coeffs = pywt.wavedec(np.array(seq_power).astype(float), wavelet, level=max_level)
         # for level, coeff in enumerate(coeffs[1:], start=1):
@@ -457,24 +456,24 @@ class DataRT(DataBase):
         #     plt.plot(coeffs[level], label=f'{wavelet} level {level} [{max_level}]')
         #     plt.xlim(0, len(coeffs[level]))
         #     plt.legend()
-        seq_wavelet = np.array(self.db[key].seq_wavelet)
-        seq_wt_power_bg = np.array(self.db[key].seq_wt_power_bg)
-        seq_wt_power_pioneer = np.array(self.db[key].seq_wt_power_pioneer)
-        for i in range(self.wavelet_max_level):
-            plt.subplot(n_subplots, 1, i + 2)
-            plt.plot(seq_wavelet[:, i], label=f'level {i + 1} [{self.wavelet_max_level}]')
-            plt.plot(seq_wt_power_pioneer[:, i], label=f'seq_wt_power_pioneer')
-            plt.plot(seq_wt_power_bg[:, i], label=f'seq_wt_power_bg')
-            plt.xlim(0, seq_len)
-            plt.legend()
+        # seq_wavelet = np.array(self.db[key].seq_wavelet)
+        # seq_wt_power_bg = np.array(self.db[key].seq_wt_power_bg)
+        # seq_wt_power_pioneer = np.array(self.db[key].seq_wt_power_pioneer)
+        # for i in range(self.wavelet_max_level):
+        #     plt.subplot(n_subplots, 1, i + 2)
+        #     plt.plot(seq_wavelet[:, i], label=f'level {i + 1} [{self.wavelet_max_level}]')
+        #     plt.plot(seq_wt_power_pioneer[:, i], label=f'seq_wt_power_pioneer')
+        #     plt.plot(seq_wt_power_bg[:, i], label=f'seq_wt_power_bg')
+        #     plt.xlim(0, seq_len)
+        #     plt.legend()
 
         if voltage_plot_available:
             plt.subplot(n_subplots, 1, n_subplots)
             plt.plot(time_stamps, np.array(seq_power_voltage).astype(float), label='voltage')
+            plt.plot(time_stamps, np.array(seq_filtered).astype(float), label='seq_filtered', color='cyan')
             plt.xlim(0, seq_len)
+            plt.ylim(-1024, 4096 * 2)
             plt.legend()
-
-        plt.ylim(-1024, 4096 * 2)
 
         plt.tight_layout()
         plt.title(save_name)

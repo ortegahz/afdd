@@ -60,9 +60,9 @@ class ArcDetector:
         self.sample_rate_new = 22325
         self.filter_cutoff_freq = self.sample_rate_new * 0.4  # hz
         self.filter_order = 4
-        # self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter()
+        self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter()
         # self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter_lp()
-        # self.filter_zi = self.filter_zi_org
+        self.filter_zi = self.filter_zi_org
         self.sample_win_size = self.sample_rate  # 1s
         self.sample_cnt = 1024
         self.samples_neg, self.samples_pos = list(), list()
@@ -121,7 +121,7 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v1/best_e348_b0.9867.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e472_b0.9878.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v9 - dv37/afdd_models_mp/best_e501_b0.9864.pt'):
-    def _build_model(self, path_model='/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e7621_acc0.8451.pt'):
+    def _build_model(self, path_model='/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e7966_acc0.9241.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         # self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -287,7 +287,7 @@ class ArcDetector:
         self.filter_max, self.filter_th, self.filter_th_cnt = -1, -1, 0
         self.samples_neg.clear()
         self.samples_pos.clear()
-        # self.filter_zi = self.filter_zi_org
+        self.filter_zi = self.filter_zi_org
         self.db.reset()
 
     def _design_highpass_filter(self):
@@ -1105,6 +1105,9 @@ class ArcDetector:
     def infer_v6(self, feat_sample=False, blacklist_sample=False):
         self.seq_power_proc_len += 1
         power_pick = self.db.db['rt'].seq_power[-1]
+        _power_pick_voltage = self.db.db['rt'].seq_power_voltage[-1]
+        filtered_sample, self.filter_zi = self._realtime_highpass_filter(_power_pick_voltage)
+        self.db.db['rt'].seq_filtered[-1] = filtered_sample * self.indicator_max_val / 32
         self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
             else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
         self.db.db['rt'].seq_power_mean[-1] = self.power_mean
