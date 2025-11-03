@@ -12,14 +12,14 @@ from tqdm import tqdm
 
 # 确保可以找到 cores 子目录下的模块
 # 假设此脚本位于项目根目录，或者项目根目录已添加到 PYTHONPATH
-try:
-    from cores.classifier import ClassifierCNNAE
-    from cores.features_generator import HDF5Dataset, HDF5SequentialSliceDataset
-except ImportError:
-    # 一个常见的回退方法：将父目录添加到Python路径
-    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-    from cores.classifier import ClassifierCNNAE
-    from cores.features_generator import HDF5Dataset
+# -- 健壮的路径修正方案 --
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from cores.nets import NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem
+from cores.features_generator import FeaturesGeneratorCNN, HDF5SequentialSliceDataset
+
 
 # 提早检查matplotlib，如果未安装则给出明确错误
 try:
@@ -47,7 +47,7 @@ def parse_args():
     parser.add_argument(
         '--model_path',
         type=str,
-        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e271_acc0.9867.pt",
+        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e9_acc0.9015.pt",
         help="预训练的AutoEncoder模型 (.pt 文件) 的路径。"
     )
     parser.add_argument(
@@ -55,6 +55,13 @@ def parse_args():
         type=str,
         default="/home/manu/tmp/afd_pm_hdf5/train_data.h5",
         help="HDF5测试数据文件 (例如, test_data.h5) 的路径。"
+    )
+    parser.add_argument(
+        '--ae_model_type',
+        type=str,
+        default='unet-mem',
+        choices=['unet', 'mem-ae', 'unet-mem'],
+        help="要加载的自编码器模型架构类型。"
     )
     parser.add_argument(
         '--output_dir',
@@ -149,10 +156,22 @@ def main():
         return
 
     # --- 2. 加载模型 ---
-    classifier_args = argparse.Namespace(rank=0, path_ckpt=args.model_path, save_dir=None)
+    model_map = {
+        'unet': NetAFDAE_UNet,
+        'mem-ae': NetAFDAE_Mem,
+        'unet-mem': NetAFDAE_UNet_Mem
+    }
+    if args.ae_model_type not in model_map:
+        logging.error(f"不支持的模型类型: {args.ae_model_type}")
+        return
+
     try:
-        classifier = ClassifierCNNAE(args=classifier_args, ddp=False)
-        model = classifier.model.to(device)
+        # 直接实例化模型
+        model_class = model_map[args.ae_model_type]
+        model = model_class()
+        # 加载权重
+        model.load_state_dict(torch.load(args.model_path, map_location=device))
+        model.to(device)
         model.eval()
         logging.info(f"成功从 {args.model_path} 加载模型")
     except Exception as e:
@@ -160,12 +179,12 @@ def main():
         return
 
     # --- 3. 准备数据集 ---
-    # dataset = HDF5SequentialSliceDataset(args.test_data_path, transform=classifier.features_generator.transform_sample_ae)
+    features_generator = FeaturesGeneratorCNN()
     dataset = HDF5SequentialSliceDataset(
         hdf5_file_path=args.test_data_path,
-        transform=classifier.features_generator.transform_sample_ae,
-        seq_len=classifier.features_generator.seq_len,
-        step=classifier.features_generator.seq_len  # step=seq_len 表示无重叠切片
+        transform=features_generator.transform_sample_ae,
+        seq_len=features_generator.seq_len,
+        step=features_generator.seq_len  # step=seq_len 表示无重叠切片
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     logging.info(f"已加载数据集，包含 {len(dataset)} 个样本。")
@@ -176,7 +195,8 @@ def main():
     with torch.no_grad():
         for inputs, labels in tqdm(loader, desc="正在处理样本"):
             inputs = inputs.to(device)
-            reconstructions, _ = model(inputs)
+            # 所有AE模型都返回三元组 (reconstruction, latent, aux_output)
+            reconstructions, _, _ = model(inputs)
 
             # 注意: 计算每个样本的均方误差 (MSE)。
             # 假设输入形状为 [N, C, H, W]，例如 [64, 1, 1, 448]。
