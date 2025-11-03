@@ -180,6 +180,29 @@ class MemoryModule(nn.Module):
         return z_retrieved, attention
 
 
+def create_flow_model(latent_dim, num_layers=4, hidden_features=64):
+    """辅助函数，用于创建 Normalizing Flow 模型 (RealNVP)"""
+    try:
+        from nflows.flows.base import Flow
+        from nflows.distributions.normal import StandardNormal
+        from nflows.transforms.base import CompositeTransform
+        from nflows.transforms.autoregressive import MaskedAffineAutoregressiveTransform
+        from nflows.transforms.permutations import RandomPermutation
+    except ImportError:
+        raise ImportError("Please install nflows: pip install nflows")
+
+    base_dist = StandardNormal(shape=[latent_dim])
+    transforms = []
+    for _ in range(num_layers):
+        transforms.append(RandomPermutation(features=latent_dim))
+        transforms.append(MaskedAffineAutoregressiveTransform(
+            features=latent_dim,
+            hidden_features=hidden_features
+        ))
+    transform = CompositeTransform(transforms)
+    return Flow(transform, base_dist)
+
+
 class NetAFDAE_UNet(nn.Module):
     """
     一个增强版的自编码器，集成了以下特性以提升重构精度：
@@ -334,6 +357,41 @@ class NetAFDAE_Mem(nn.Module):
         reconstructed_x = self.decode(z_retrieved)
 
         return reconstructed_x, z_query, attention
+
+
+class NetAFDAE_Mem_Flow(nn.Module):
+    """
+    在 MemAE 的基础上，增加了 Normalizing Flow 模型来对潜空间进行概率密度建模。
+    这允许模型不仅通过重构误差，还通过潜向量的概率来检测异常。
+    """
+
+    def __init__(self, latent_dim=128, mem_dim=2048):
+        super().__init__()
+        # 复用原始的 NetAFDAE 结构作为编码器和解码器的基础
+        self.base_ae = NetAFDAE(latent_dim)
+
+        # 插入记忆模块
+        self.memory_module = MemoryModule(mem_dim=mem_dim, fea_dim=latent_dim)
+
+        # 插入 Flow 模型
+        self.flow_model = create_flow_model(latent_dim=latent_dim)
+
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
+        return self.base_ae.encode(x)
+
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        return self.base_ae.decode(z)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        完整的前向传播。
+        返回: (重建信号, 原始潜向量, 注意力权重, 对数概率)
+        """
+        z_query = self.encode(x)
+        z_retrieved, attention = self.memory_module(z_query)
+        reconstructed_x = self.decode(z_retrieved)
+        log_prob = self.flow_model.log_prob(z_query)
+        return reconstructed_x, z_query, attention, log_prob
 
 
 import torch.nn as nn

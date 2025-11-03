@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader
 from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset
 from cores.features_generator import HDF5SPDataset, HDF5Dataset, HDF5SequentialSliceDataset
 from cores.loss import HardExampleMiningFocalLoss, F
-from cores.nets import NetAFD, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem
+from cores.nets import NetAFD, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem, NetAFDAE_Mem_Flow
 from utils.macros import MIN_VAL_TH
 
 
@@ -370,7 +370,7 @@ class ClassifierCNNAE(ClassifierBase):
         self.num_epochs = 8192
         self.lr = 1e-5
         self.ae_model_type = getattr(args, 'ae_model_type', 'unet')
-
+        model = None
         if self.ae_model_type == 'unet':
             model = NetAFDAE_UNet().to(self.local_rank)
             self.use_mem_ae = False
@@ -382,16 +382,24 @@ class ClassifierCNNAE(ClassifierBase):
             model = NetAFDAE_UNet_Mem(latent_dim=128, mem_dim=2048).to(self.local_rank)
             self.use_mem_ae = True
             self.sparsity_weight = 1e-4
+        elif self.ae_model_type == 'mem-flow-ae':
+            model = NetAFDAE_Mem_Flow(latent_dim=128, mem_dim=2048).to(self.local_rank)
+            self.use_mem_ae = True  # It's also a memory AE
+            self.sparsity_weight = 1e-5
+            self.flow_loss_weight = 1e-5  # Weight for the flow model's NLL loss
         else:
             raise ValueError(f"Unsupported AE model type: {self.ae_model_type}")
 
         self.model = model
-        self.optimizer = optim.Adam(self.model.parameters(), self.lr)
+        # For flow models, it might be better to use separate optimizers, but one is fine for a start.
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
 
         if self.local_rank == 0:
             logging.info(f"Initialized AE model of type: '{self.ae_model_type}'")
             if self.use_mem_ae:
                 logging.info(f"Sparsity loss weight for MemAE: {self.sparsity_weight}")
+            if 'flow' in self.ae_model_type:
+                logging.info(f"Flow loss weight: {self.flow_loss_weight}")
 
         if args.path_ckpt is not None:
             self._load_checkpoint_v0(args.path_ckpt)
@@ -452,7 +460,7 @@ class ClassifierCNNAE(ClassifierBase):
             if is_distributed:
                 train_sampler.set_epoch(epoch)
             epoch_loss = 0.0
-            epoch_recon_loss, epoch_sparsity_loss = 0.0, 0.0
+            epoch_recon_loss, epoch_sparsity_loss, epoch_flow_loss = 0.0, 0.0, 0.0
             num_batches = 0
             for inputs, labels in loader:  # Labels are used to filter for normal data
                 # Filter for normal data (label == 0)
@@ -462,15 +470,24 @@ class ClassifierCNNAE(ClassifierBase):
 
                 inputs_normal = inputs[normal_indices].to(self.local_rank)
 
-                reconstructions, _, aux_output = self.model(inputs_normal)
+                # Unpack model outputs
+                model_outputs = self.model(inputs_normal)
+                reconstructions, _, aux_output = model_outputs[:3]
                 recon_loss = self.criterion(reconstructions, inputs_normal)
                 loss = recon_loss
 
+                # Sparsity loss (for memory models)
                 sparsity_loss = torch.tensor(0.0).to(self.local_rank)
                 if self.use_mem_ae and aux_output is not None:
-                    # aux_output for MemAE is the attention weights
                     sparsity_loss = self._entropy_loss(aux_output)
                     loss += self.sparsity_weight * sparsity_loss
+
+                # Flow loss (for flow-based models)
+                flow_loss = torch.tensor(0.0).to(self.local_rank)
+                if self.ae_model_type == 'mem-flow-ae':
+                    log_prob = model_outputs[3]
+                    flow_loss = -log_prob.mean()  # Minimize negative log-likelihood
+                    loss += self.flow_loss_weight * flow_loss
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -480,11 +497,14 @@ class ClassifierCNNAE(ClassifierBase):
                 epoch_recon_loss += recon_loss.item()
                 if self.use_mem_ae:
                     epoch_sparsity_loss += sparsity_loss.item()
+                if self.ae_model_type == 'mem-flow-ae':
+                    epoch_flow_loss += flow_loss.item()
                 num_batches += 1
 
             avg_epoch_loss = epoch_loss / num_batches if num_batches > 0 else 0
             avg_recon_loss = epoch_recon_loss / num_batches if num_batches > 0 else 0
             avg_sparsity_loss = epoch_sparsity_loss / num_batches if num_batches > 0 else 0
+            avg_flow_loss = epoch_flow_loss / num_batches if num_batches > 0 else 0
 
             val_accuracy = self.evaluate(data['test_path']) if not loss_ckp else 1 - avg_epoch_loss
             epoch_duration = time.time() - epoch_start_time
@@ -495,11 +515,18 @@ class ClassifierCNNAE(ClassifierBase):
                     f'Time: {epoch_duration:.2f}s, '
                     f'Validation Acc: {val_accuracy:.4f}'
                 )
-                if self.use_mem_ae:
+                if self.ae_model_type == 'mem-flow-ae':
+                    w_sparsity = avg_sparsity_loss * self.sparsity_weight
+                    w_flow = avg_flow_loss * self.flow_loss_weight
+                    log_msg += (
+                        f' | Total Loss: {avg_epoch_loss:.8f}\n'
+                        f'        Raw Losses      -> Recon: {avg_recon_loss:.8f}, Sparsity: {avg_sparsity_loss:.8f}, Flow: {avg_flow_loss:.8f}\n'
+                        f'        Weighted Losses -> Recon: {avg_recon_loss:.8f}, Sparsity: {w_sparsity:.8f}, Flow: {w_flow:.8f}'
+                    )
+                elif self.use_mem_ae:
                     log_msg += (
                         f' | Total Loss: {avg_epoch_loss:.8f} '
-                        f'(Recon: {avg_recon_loss:.8f} + '
-                        f'Sparsity: {avg_sparsity_loss:.8f})'
+                        f'(Recon: {avg_recon_loss:.8f} + Sparsity: {avg_sparsity_loss:.8f})'
                     )
                 else:
                     log_msg += (

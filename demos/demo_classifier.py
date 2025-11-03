@@ -29,8 +29,9 @@ def parse_args():
     parser.add_argument('--path_ckpt', default=None)
     parser.add_argument('--model_type', type=str, default='cnn-ae', choices=['cnn', 'cnn-ae'],
                         help='Type of CNN model to run: supervised (cnn) or unsupervised AE (cnn-ae)')
-    parser.add_argument('--ae_model_type', type=str, default='unet-mem', choices=['unet', 'mem-ae', 'unet-mem'],
-                        help="Type of AutoEncoder architecture to use: 'unet' or 'mem-ae'")
+    parser.add_argument('--ae_model_type', type=str, default='mem-flow-ae',
+                        choices=['unet', 'mem-ae', 'unet-mem', 'mem-flow-ae'],
+                        help="Type of AutoEncoder architecture to use.")
     parser.add_argument('--local_rank', type=int, default=0, help='Local rank for distributed training')
     parser.add_argument('--qat', default=False, help='enable quant-aware training')
     return parser.parse_args()

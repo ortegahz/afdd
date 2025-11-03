@@ -17,7 +17,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from cores.nets import NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem
+from cores.nets import NetAFDAE_Mem_Flow, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem
 from cores.features_generator import FeaturesGeneratorCNN, HDF5SequentialSliceDataset
 
 
@@ -47,7 +47,7 @@ def parse_args():
     parser.add_argument(
         '--model_path',
         type=str,
-        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e9_acc0.9015.pt",
+        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e756_acc1.1940.pt",
         help="预训练的AutoEncoder模型 (.pt 文件) 的路径。"
     )
     parser.add_argument(
@@ -59,8 +59,8 @@ def parse_args():
     parser.add_argument(
         '--ae_model_type',
         type=str,
-        default='unet-mem',
-        choices=['unet', 'mem-ae', 'unet-mem'],
+        default='mem-flow-ae',
+        choices=['unet', 'mem-ae', 'unet-mem', 'mem-flow-ae'],
         help="要加载的自编码器模型架构类型。"
     )
     parser.add_argument(
@@ -159,7 +159,8 @@ def main():
     model_map = {
         'unet': NetAFDAE_UNet,
         'mem-ae': NetAFDAE_Mem,
-        'unet-mem': NetAFDAE_UNet_Mem
+        'unet-mem': NetAFDAE_UNet_Mem,
+        'mem-flow-ae': NetAFDAE_Mem_Flow
     }
     if args.ae_model_type not in model_map:
         logging.error(f"不支持的模型类型: {args.ae_model_type}")
@@ -196,7 +197,7 @@ def main():
         for inputs, labels in tqdm(loader, desc="正在处理样本"):
             inputs = inputs.to(device)
             # 所有AE模型都返回三元组 (reconstruction, latent, aux_output)
-            reconstructions, _, _ = model(inputs)
+            reconstructions, *_ = model(inputs)
 
             # 注意: 计算每个样本的均方误差 (MSE)。
             # 假设输入形状为 [N, C, H, W]，例如 [64, 1, 1, 448]。
