@@ -27,8 +27,10 @@ def parse_args():
     parser.add_argument('--path_label_train', default='/home/manu/tmp/afd_pm_train')
     # parser.add_argument('--path_label_test', default='/home/Huangzhe/test/afd_pm_test')
     parser.add_argument('--path_ckpt', default=None)
-    parser.add_argument('--model_type', type=str, default='cnn-ae', choices=['cnn', 'cnn-ae'],
+    parser.add_argument('--model_type', type=str, default='cnn-mem-ae', choices=['cnn', 'cnn-ae', 'cnn-mem-ae'],
                         help='Type of CNN model to run: supervised (cnn) or unsupervised AE (cnn-ae)')
+    parser.add_argument('--ae_model_type', type=str, default='mem-ae', choices=['unet', 'mem-ae'],
+                        help="Type of AutoEncoder architecture to use: 'unet' or 'mem-ae'")
     parser.add_argument('--local_rank', type=int, default=0, help='Local rank for distributed training')
     parser.add_argument('--qat', default=False, help='enable quant-aware training')
     return parser.parse_args()
@@ -131,7 +133,7 @@ def main_worker(rank, world_size, args):
     args.world_size = world_size
     if args.model_type == 'cnn':
         run_cnn(args, is_distributed)
-    elif args.model_type == 'cnn-ae':
+    elif args.model_type in ['cnn-ae', 'cnn-mem-ae']:
         run_cnn_ae(args, is_distributed)
 
 

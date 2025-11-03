@@ -7,11 +7,11 @@ import torch
 
 # 确保您可以从您的项目结构中导入这些模块
 # 如果 nets.py 在不同目录下，您可能需要调整 sys.path
-from cores.nets import NetAFDAE_UNet
+from cores.nets import NetAFDAE_Mem
 
 # --- 配置 ---
 SAVE_DIR = "/home/manu/tmp"  # 您希望保存ONNX文件的目录
-ONNX_FILENAME = "afdd_ae_unet.onnx"
+ONNX_FILENAME = "afdd_ae_mem.onnx"
 ONNX_PATH = os.path.join(SAVE_DIR, ONNX_FILENAME)
 
 
@@ -24,7 +24,8 @@ def export_model_to_onnx():
 
     # --- 1. 初始化模型并设置为评估模式 ---
     print("Step 1: Initializing the NetAFDAE_UNet model...")
-    model = NetAFDAE_UNet(latent_dim=128)
+    # model = NetAFDAE_UNet(latent_dim=128)
+    model = NetAFDAE_Mem(latent_dim=128, mem_dim=2048)
     model.eval()  # 非常重要！必须设置为评估模式
     print("Model initialized successfully.")
 
@@ -41,14 +42,15 @@ def export_model_to_onnx():
     # --- 3. 定义 ONNX 导出参数 ---
     # 为输入和输出节点命名，方便后续调用
     input_names = ["input"]
-    # 模型的 forward 方法返回 (reconstructed_x, z)，所以有两个输出
-    output_names = ["reconstruction", "latent"]
+    # 模型的 forward 方法返回 (reconstructed_x, z, attention)，所以有三个输出
+    output_names = ["reconstruction", "latent", "attention"]
 
     print("Step 3: Configuring ONNX export parameters...")
     print(f"  - Input node name: {input_names[0]}")
     print(f"  - Output node names: {output_names}")
 
     # 设置动态轴，允许模型处理不同大小的批量
+    # 同时为新的 attention 输出也添加动态轴
     # 'batch_size' 是我们给这个动态轴起的名字
     dynamic_axes = {
         'input': {0: 'batch_size'},
@@ -102,11 +104,13 @@ def verify_onnx_model(pytorch_model, dummy_input):
 
         # 使用 onnxruntime 进行推理
         ort_outputs = ort_session.run(None, ort_inputs)
-        ort_reconstruction, ort_latent = ort_outputs
+        # 现在有三个输出了
+        ort_reconstruction, ort_latent, ort_attention = ort_outputs
 
         # 使用 PyTorch 模型进行推理
         with torch.no_grad():
-            pt_reconstruction, pt_latent = pytorch_model(dummy_input)
+            # PyTorch 模型也返回三个输出
+            pt_reconstruction, pt_latent, pt_attention = pytorch_model(dummy_input)
 
         # 比较 PyTorch 和 ONNX 的输出
         print("Comparing outputs from PyTorch and ONNX Runtime...")

@@ -138,6 +138,48 @@ class UpBlock(nn.Module):
         return self.conv(x)
 
 
+class MemoryModule(nn.Module):
+    """
+    记忆模块，用于存储正常模式的原型。
+    它接受一个查询向量，通过注意力机制从记忆库中检索信息。
+    """
+
+    def __init__(self, mem_dim, fea_dim):
+        super().__init__()
+        self.mem_dim = mem_dim  # 记忆单元数量
+        self.fea_dim = fea_dim  # 每个记忆单元的维度 (等于 latent_dim)
+
+        # 可学习的记忆库
+        self.memory = nn.Parameter(torch.Tensor(self.mem_dim, self.fea_dim))
+        # 使用 Xavier 初始化保证初始权重分布合理
+        nn.init.xavier_uniform_(self.memory)
+
+    def forward(self, z_query: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            z_query (torch.Tensor): 编码器输出的查询向量, shape: [B, D]
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]:
+                - z_retrieved: 从记忆库中检索并加权合成的向量, shape: [B, D]
+                - attention: 注意力权重, shape: [B, M]
+        """
+        # 1. 计算注意力权重 (寻址)
+        #    - 使用余弦相似度作为度量, F.linear 是高效的矩阵乘法 z_query @ memory.T
+        #    - 对输入和记忆库都进行 L2 归一化
+        query_norm = F.normalize(z_query, p=2, dim=1)
+        memory_norm = F.normalize(self.memory, p=2, dim=1)
+        # attention shape: [B, M]
+        attention = F.softmax(F.linear(query_norm, memory_norm), dim=1)
+
+        # 2. 从记忆库中检索信息 (读取)
+        #    - 用注意力权重对记忆库中的原型进行加权求和
+        #    - 使用 torch.matmul(attention, self.memory) 来实现加权求和
+        z_retrieved = torch.matmul(attention, self.memory)
+
+        return z_retrieved, attention
+
+
 class NetAFDAE_UNet(nn.Module):
     """
     一个增强版的自编码器，集成了以下特性以提升重构精度：
@@ -211,10 +253,47 @@ class NetAFDAE_UNet(nn.Module):
 
         return self.out_conv(x)
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor or None]:
         z, skips = self.encode(x)
         reconstructed_x = self.decode(z, skips)
-        return reconstructed_x, z
+        # 返回一个额外的 None 以统一接口
+        return reconstructed_x, z, None
+
+
+class NetAFDAE_Mem(nn.Module):
+    """
+    基于 NetAFDAE 结构的记忆增强自编码器 (Memory-Augmented Autoencoder)。
+    它在编码器和解码器之间插入一个记忆模块，强制模型通过固定的“正常模式”
+    原型来重构输入，从而增强对异常的敏感度。
+    """
+
+    def __init__(self, latent_dim=128, mem_dim=2048):
+        super().__init__()
+        # 复用原始的 NetAFDAE 结构作为编码器和解码器的基础
+        self.base_ae = NetAFDAE(latent_dim)
+
+        # 插入记忆模块
+        self.memory_module = MemoryModule(mem_dim=mem_dim, fea_dim=latent_dim)
+
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
+        return self.base_ae.encode(x)
+
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        return self.base_ae.decode(z)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        完整的前向传播。
+        返回: (重建的信号, 原始潜在向量, 注意力权重)
+        """
+        # 1. 编码得到查询向量 z_query
+        z_query = self.encode(x)
+        # 2. 通过记忆模块检索得到 z_retrieved 和注意力权重
+        z_retrieved, attention = self.memory_module(z_query)
+        # 3. 使用检索到的 z_retrieved 进行解码
+        reconstructed_x = self.decode(z_retrieved)
+
+        return reconstructed_x, z_query, attention
 
 
 import torch.nn as nn

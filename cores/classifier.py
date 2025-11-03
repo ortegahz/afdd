@@ -20,8 +20,8 @@ from torch.utils.data import DataLoader
 
 from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset
 from cores.features_generator import HDF5SPDataset, HDF5Dataset, HDF5SequentialSliceDataset
-from cores.loss import HardExampleMiningFocalLoss, F
-from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet
+from cores.loss import HardExampleMiningFocalLoss, F  # F is unused here but kept for context
+from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_Mem
 from utils.macros import MIN_VAL_TH
 
 
@@ -357,16 +357,38 @@ class ClassifierCNN(ClassifierBase):
 
 class ClassifierCNNAE(ClassifierBase):
     def __init__(self, args, ddp=False):
+        """
+        Initializes the AutoEncoder-based classifier.
+
+        Args:
+            args: Command line arguments, should include `ae_model_type`
+                  to select between 'unet' and 'mem-ae'.
+            ddp (bool): Flag for distributed data parallel.
+        """
         super().__init__()
         self.local_rank = args.rank
         self.num_epochs = 8192
         self.lr = 1e-5
+        self.ae_model_type = getattr(args, 'ae_model_type', 'unet')
 
-        # model = NetAFDAE().to(self.local_rank)
-        model = NetAFDAE_UNet().to(self.local_rank)
+        if self.ae_model_type == 'unet':
+            model = NetAFDAE_UNet().to(self.local_rank)
+            self.use_mem_ae = False
+        elif self.ae_model_type == 'mem-ae':
+            model = NetAFDAE_Mem(latent_dim=128, mem_dim=2048).to(self.local_rank)
+            self.use_mem_ae = True
+            # 为记忆模块的稀疏性损失设置权重
+            self.sparsity_weight = 1e-4
+        else:
+            raise ValueError(f"Unsupported AE model type: {self.ae_model_type}")
 
         self.model = model
         self.optimizer = optim.Adam(self.model.parameters(), self.lr)
+
+        if self.local_rank == 0:
+            logging.info(f"Initialized AE model of type: '{self.ae_model_type}'")
+            if self.use_mem_ae:
+                logging.info(f"Sparsity loss weight for MemAE: {self.sparsity_weight}")
 
         if args.path_ckpt is not None:
             self._load_checkpoint_v0(args.path_ckpt)
@@ -393,6 +415,19 @@ class ClassifierCNNAE(ClassifierBase):
         self.model.load_state_dict(state_dict, strict=False)
         logging.info(f'Loaded checkpoint from {checkpoint_path}')
 
+    def _entropy_loss(self, attention_weights: torch.Tensor) -> torch.Tensor:
+        """
+        计算注意力权重的熵损失，以鼓励稀疏性。
+        熵越小，表示注意力分布越集中（越稀疏）。
+        L_sparsity = sum(entropy(attention))
+        """
+        # 添加一个小的 epsilon 防止 log(0)
+        epsilon = 1e-12
+        # H(p) = - sum(p * log(p))
+        entropy = -attention_weights * torch.log(attention_weights + epsilon)
+        # 在所有记忆单元维度上求和，然后在批次维度上求平均
+        return torch.mean(torch.sum(entropy, dim=1))
+
     def train(self, data, loss_ckp=True):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
@@ -414,6 +449,7 @@ class ClassifierCNNAE(ClassifierBase):
             if is_distributed:
                 train_sampler.set_epoch(epoch)
             epoch_loss = 0.0
+            epoch_recon_loss, epoch_sparsity_loss = 0.0, 0.0
             num_batches = 0
             for inputs, labels in loader:  # Labels are used to filter for normal data
                 # Filter for normal data (label == 0)
@@ -423,26 +459,50 @@ class ClassifierCNNAE(ClassifierBase):
 
                 inputs_normal = inputs[normal_indices].to(self.local_rank)
 
-                reconstructions, _ = self.model(inputs_normal)
-                loss = self.criterion(reconstructions, inputs_normal)
+                reconstructions, _, aux_output = self.model(inputs_normal)
+                recon_loss = self.criterion(reconstructions, inputs_normal)
+                loss = recon_loss
+
+                sparsity_loss = torch.tensor(0.0).to(self.local_rank)
+                if self.use_mem_ae and aux_output is not None:
+                    # aux_output for MemAE is the attention weights
+                    sparsity_loss = self._entropy_loss(aux_output)
+                    loss += self.sparsity_weight * sparsity_loss
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
 
                 epoch_loss += loss.item()
+                epoch_recon_loss += recon_loss.item()
+                if self.use_mem_ae:
+                    epoch_sparsity_loss += sparsity_loss.item()
                 num_batches += 1
 
             avg_epoch_loss = epoch_loss / num_batches if num_batches > 0 else 0
+            avg_recon_loss = epoch_recon_loss / num_batches if num_batches > 0 else 0
+            avg_sparsity_loss = epoch_sparsity_loss / num_batches if num_batches > 0 else 0
+
             val_accuracy = self.evaluate(data['test_path']) if not loss_ckp else 1 - avg_epoch_loss
             epoch_duration = time.time() - epoch_start_time
 
             if self.rank == 0:
-                logging.info(
-                    f'Epoch [{epoch + 1}/{self.num_epochs}],'
-                    f' Train Loss: {avg_epoch_loss:.8f},'
-                    f' Validation Accuracy: {val_accuracy:.4f},'
-                    f' Time: {epoch_duration:.2f} seconds')
+                log_msg = (
+                    f'Epoch [{epoch + 1}/{self.num_epochs}], '
+                    f'Time: {epoch_duration:.2f}s, '
+                    f'Validation Acc: {val_accuracy:.4f}'
+                )
+                if self.use_mem_ae:
+                    log_msg += (
+                        f' | Total Loss: {avg_epoch_loss:.8f} '
+                        f'(Recon: {avg_recon_loss:.8f} + '
+                        f'Sparsity: {avg_sparsity_loss:.8f})'
+                    )
+                else:
+                    log_msg += (
+                        f' | Train Loss: {avg_epoch_loss:.8f}'
+                    )
+                logging.info(log_msg)
 
                 if val_accuracy > best_accuracy:
                     best_accuracy = val_accuracy
