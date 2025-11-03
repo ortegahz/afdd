@@ -20,8 +20,8 @@ from torch.utils.data import DataLoader
 
 from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset
 from cores.features_generator import HDF5SPDataset, HDF5Dataset, HDF5SequentialSliceDataset
-from cores.loss import HardExampleMiningFocalLoss, F  # F is unused here but kept for context
-from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_Mem
+from cores.loss import HardExampleMiningFocalLoss, F
+from cores.nets import NetAFD, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem
 from utils.macros import MIN_VAL_TH
 
 
@@ -377,7 +377,10 @@ class ClassifierCNNAE(ClassifierBase):
         elif self.ae_model_type == 'mem-ae':
             model = NetAFDAE_Mem(latent_dim=128, mem_dim=2048).to(self.local_rank)
             self.use_mem_ae = True
-            # 为记忆模块的稀疏性损失设置权重
+            self.sparsity_weight = 1e-4
+        elif self.ae_model_type == 'unet-mem':
+            model = NetAFDAE_UNet_Mem(latent_dim=128, mem_dim=2048).to(self.local_rank)
+            self.use_mem_ae = True
             self.sparsity_weight = 1e-4
         else:
             raise ValueError(f"Unsupported AE model type: {self.ae_model_type}")
@@ -541,7 +544,7 @@ class ClassifierCNNAE(ClassifierBase):
         with torch.no_grad():
             for batch_x in loader:
                 batch_x = batch_x.to(self.local_rank)
-                reconstructions, latents = model_to_infer(batch_x)
+                reconstructions, latents, _ = model_to_infer(batch_x)
 
                 # Calculate mean squared error for each sample in the batch.
                 # Shape of batch_x & reconstructions: [batch, 1, seq_len]
@@ -601,7 +604,7 @@ class ClassifierCNNAE(ClassifierBase):
         with torch.no_grad():
             for inputs, labels in loader:
                 inputs = inputs.to(self.local_rank)
-                reconstructions, _ = model_to_eval(inputs)
+                reconstructions, _, __ = model_to_eval(inputs)
 
                 errors = torch.mean((inputs - reconstructions) ** 2, dim=(1, 2)).cpu().numpy()
 

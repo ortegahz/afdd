@@ -260,6 +260,46 @@ class NetAFDAE_UNet(nn.Module):
         return reconstructed_x, z, None
 
 
+class NetAFDAE_UNet_Mem(nn.Module):
+    """
+    结合了 U-Net 结构和记忆模块的终极版自编码器。
+    - 使用 U-Net 的编码器和解码器以获得高质量的重构。
+    - 插入记忆模块以强制通过“正常模式”原型进行重构，增强对异常的敏感度。
+    """
+
+    def __init__(self, latent_dim=128, mem_dim=2048):
+        super().__init__()
+        # 实例化 U-Net 作为基础，但不直接作为子模块调用，而是复用其组件
+        self.base_unet = NetAFDAE_UNet(latent_dim)
+
+        # 插入记忆模块
+        self.memory_module = MemoryModule(mem_dim=mem_dim, fea_dim=latent_dim)
+
+    def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, list]:
+        # 使用 U-Net 的编码器，返回 z 和 skip connections
+        return self.base_unet.encode(x)
+
+    def decode(self, z: torch.Tensor, skips: list) -> torch.Tensor:
+        # 使用 U-Net 的解码器
+        return self.base_unet.decode(z, skips)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        完整的前向传播。
+        返回: (重建的信号, 原始潜在向量, 注意力权重)
+        """
+        # 1. 编码得到查询向量 z_query 和 skip connections
+        z_query, skips = self.encode(x)
+
+        # 2. 通过记忆模块检索得到 z_retrieved 和注意力权重
+        z_retrieved, attention = self.memory_module(z_query)
+
+        # 3. 使用检索到的 z_retrieved 和原始的 skips进行解码
+        reconstructed_x = self.decode(z_retrieved, skips)
+
+        return reconstructed_x, z_query, attention
+
+
 class NetAFDAE_Mem(nn.Module):
     """
     基于 NetAFDAE 结构的记忆增强自编码器 (Memory-Augmented Autoencoder)。

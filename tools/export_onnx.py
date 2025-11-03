@@ -7,11 +7,11 @@ import torch
 
 # 确保您可以从您的项目结构中导入这些模块
 # 如果 nets.py 在不同目录下，您可能需要调整 sys.path
-from cores.nets import NetAFDAE_Mem
+from cores.nets import NetAFDAE_UNet_Mem
 
 # --- 配置 ---
 SAVE_DIR = "/home/manu/tmp"  # 您希望保存ONNX文件的目录
-ONNX_FILENAME = "afdd_ae_mem.onnx"
+ONNX_FILENAME = "afdd_ae_mem_unet.onnx"
 ONNX_PATH = os.path.join(SAVE_DIR, ONNX_FILENAME)
 
 
@@ -25,7 +25,7 @@ def export_model_to_onnx():
     # --- 1. 初始化模型并设置为评估模式 ---
     print("Step 1: Initializing the NetAFDAE_UNet model...")
     # model = NetAFDAE_UNet(latent_dim=128)
-    model = NetAFDAE_Mem(latent_dim=128, mem_dim=2048)
+    model = NetAFDAE_UNet_Mem(latent_dim=128, mem_dim=2048)
     model.eval()  # 非常重要！必须设置为评估模式
     print("Model initialized successfully.")
 
