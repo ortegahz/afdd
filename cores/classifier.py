@@ -386,7 +386,7 @@ class ClassifierCNNAE(ClassifierBase):
             model = NetAFDAE_Mem_Flow(latent_dim=128, mem_dim=2048).to(self.local_rank)
             self.use_mem_ae = True  # It's also a memory AE
             self.sparsity_weight = 1e-5
-            self.flow_loss_weight = 1e-5  # Weight for the flow model's NLL loss
+            self.flow_loss_weight = 1e-4  # Weight for the flow model's NLL loss
         else:
             raise ValueError(f"Unsupported AE model type: {self.ae_model_type}")
 

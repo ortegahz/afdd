@@ -47,7 +47,7 @@ def parse_args():
     parser.add_argument(
         '--model_path',
         type=str,
-        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e756_acc1.1940.pt",
+        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e2562_acc1.0001.pt",
         help="预训练的AutoEncoder模型 (.pt 文件) 的路径。"
     )
     parser.add_argument(
@@ -84,7 +84,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def plot_reconstruction(original_signal, reconstructed_signal, error, label, sample_index, output_dir):
+def plot_reconstruction(original_signal, reconstructed_signal, error, label, sample_index, output_dir, log_likelihood=None):
     """
     生成并保存一个比较原始信号和其重构信号的图像。
     """
@@ -94,10 +94,12 @@ def plot_reconstruction(original_signal, reconstructed_signal, error, label, sam
     os.makedirs(output_dir, exist_ok=True)
 
     fig, axs = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
-    title = (
-        f'Reconstruction of {sample_index}-th {label_text} Sample\n'
-        f'MSE: {error:.6f}'
-    )
+
+    title = f'Reconstruction of {sample_index}-th {label_text} Sample\n'
+    title += f'MSE: {error:.6f}'
+    if log_likelihood is not None:
+        title += f' | Log-Likelihood: {log_likelihood:.4f}'
+
     fig.suptitle(title, fontsize=16)
 
     axs[0].plot(original_signal, color='blue', label='Original')
@@ -196,12 +198,17 @@ def main():
     with torch.no_grad():
         for inputs, labels in tqdm(loader, desc="正在处理样本"):
             inputs = inputs.to(device)
-            # 所有AE模型都返回三元组 (reconstruction, latent, aux_output)
-            reconstructions, *_ = model(inputs)
+
+            # 根据模型类型处理不同的输出
+            model_outputs = model(inputs)
+            reconstructions = model_outputs[0]
+            log_probs = None
+            if args.ae_model_type == 'mem-flow-ae':
+                log_probs = model_outputs[3]  # Mem-Flow AE返回4个值，第4个是log_prob
 
             # 注意: 计算每个样本的均方误差 (MSE)。
-            # 假设输入形状为 [N, C, H, W]，例如 [64, 1, 1, 448]。
-            # 我们在特征维度 (1, 2, 3) 上计算均值来为每个样本获得一个误差分数。
+            # 假设输入形状为 [N, C, L]，例如 [64, 1, 448]。
+            # 我们在特征维度 (1, 2) 上计算均值来为每个样本获得一个误差分数。
             errors = torch.mean((inputs - reconstructions) ** 2, dim=(1, 2))
 
             # 将数据移至CPU以进行numpy转换和绘图
@@ -209,6 +216,7 @@ def main():
             recons_cpu = reconstructions.cpu().numpy()
             labels_cpu = labels.cpu().numpy()
             errors_cpu = errors.cpu().numpy()
+            log_probs_cpu = log_probs.cpu().numpy() if log_probs is not None else None
 
             for i in range(inputs.size(0)):
                 label = int(labels_cpu[i, 0])
@@ -222,6 +230,8 @@ def main():
                     sample_index = neg_counter
                     save_dir = neg_dir
 
+                ll_for_sample = log_probs_cpu[i] if log_probs_cpu is not None else None
+
                 # 调用绘图函数
                 plot_reconstruction(
                     original_signal=inputs_cpu[i].flatten(),
@@ -229,7 +239,8 @@ def main():
                     error=errors_cpu[i],
                     label=label,
                     sample_index=sample_index,
-                    output_dir=save_dir
+                    output_dir=save_dir,
+                    log_likelihood=ll_for_sample
                 )
 
     logging.info("-" * 40)
