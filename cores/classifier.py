@@ -368,7 +368,7 @@ class ClassifierCNNAE(ClassifierBase):
         super().__init__()
         self.local_rank = args.rank
         self.num_epochs = 8192
-        self.lr = 1e-2
+        self.lr = 1e-3
         self.ae_model_type = getattr(args, 'ae_model_type', 'mem-flow-ae')
         model = None
         if self.ae_model_type == 'unet':
@@ -385,7 +385,7 @@ class ClassifierCNNAE(ClassifierBase):
         elif self.ae_model_type == 'mem-flow-ae':
             model = NetAFDAE_Mem_Flow(latent_dim=128, mem_dim=2048).to(self.local_rank)
             self.use_mem_ae = True  # It's also a memory AE
-            self.sparsity_weight = 1e-2
+            self.sparsity_weight = 1e-3
             self.flow_loss_weight = 0.0  # 1e-4  # Weight for the flow model's NLL loss
         else:
             raise ValueError(f"Unsupported AE model type: {self.ae_model_type}")
@@ -440,7 +440,7 @@ class ClassifierCNNAE(ClassifierBase):
         # 在所有记忆单元维度上求和，然后在批次维度上求平均
         return torch.mean(torch.sum(entropy, dim=1))
 
-    def train(self, data, loss_ckp=True):
+    def train(self, data, loss_ckp=False):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
 
@@ -579,7 +579,7 @@ class ClassifierCNNAE(ClassifierBase):
         with torch.no_grad():
             for batch_x in loader:
                 batch_x = batch_x.to(self.local_rank)
-                reconstructions, latents, _, _ = model_to_infer(batch_x)
+                reconstructions, latents, *_ = model_to_infer(batch_x)
 
                 # Calculate mean squared error for each sample in the batch.
                 # Shape of batch_x & reconstructions: [batch, 1, seq_len]
@@ -640,7 +640,7 @@ class ClassifierCNNAE(ClassifierBase):
         with torch.no_grad():
             for inputs, labels in loader:
                 inputs = inputs.to(self.local_rank)
-                reconstructions, _, __ = model_to_eval(inputs)
+                reconstructions, *_ = model_to_eval(inputs)
 
                 errors = torch.mean((inputs - reconstructions) ** 2, dim=(1, 2)).cpu().numpy()
 
