@@ -39,6 +39,17 @@ def setup_logging():
     )
 
 
+def calculate_attention_entropy(attention_weights, epsilon=1e-12):
+    """
+    计算注意力权重的熵，以评估稀疏性。
+    熵越低，分布越稀疏（集中）。
+    """
+    # H(p) = - sum(p * log(p))
+    entropy = -attention_weights * torch.log(attention_weights + epsilon)
+    # 在记忆单元维度上求和，得到每个样本的熵
+    return torch.sum(entropy, dim=1)
+
+
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
@@ -85,7 +96,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def plot_reconstruction(original_signal, reconstructed_signal, error, label, sample_index, output_dir, log_likelihood=None):
+def plot_reconstruction(original_signal, reconstructed_signal, error, label, sample_index, output_dir, log_likelihood=None, attention_entropy=None):
     """
     生成并保存一个比较原始信号和其重构信号的图像。
     """
@@ -100,6 +111,8 @@ def plot_reconstruction(original_signal, reconstructed_signal, error, label, sam
     title += f'MSE: {error:.6f}'
     if log_likelihood is not None:
         title += f' | Log-Likelihood: {log_likelihood:.4f}'
+    if attention_entropy is not None:
+        title += f' | Attention Entropy: {attention_entropy:.4f}'
 
     fig.suptitle(title, fontsize=16)
 
@@ -204,8 +217,13 @@ def main():
             model_outputs = model(inputs)
             reconstructions = model_outputs[0]
             log_probs = None
+            attention_weights = None
+
             if args.ae_model_type == 'mem-flow-ae':
+                attention_weights = model_outputs[2]
                 log_probs = model_outputs[3]  # Mem-Flow AE返回4个值，第4个是log_prob
+            elif args.ae_model_type in ['mem-ae', 'unet-mem']:
+                attention_weights = model_outputs[2]
 
             # 注意: 计算每个样本的均方误差 (MSE)。
             # 假设输入形状为 [N, C, L]，例如 [64, 1, 448]。
@@ -213,11 +231,16 @@ def main():
             errors = torch.mean((inputs - reconstructions) ** 2, dim=(1, 2))
 
             # 将数据移至CPU以进行numpy转换和绘图
+            entropies = None
+            if attention_weights is not None:
+                entropies = calculate_attention_entropy(attention_weights)
+
             inputs_cpu = inputs.cpu().numpy()
             recons_cpu = reconstructions.cpu().numpy()
             labels_cpu = labels.cpu().numpy()
             errors_cpu = errors.cpu().numpy()
             log_probs_cpu = log_probs.cpu().numpy() if log_probs is not None else None
+            entropies_cpu = entropies.cpu().numpy() if entropies is not None else None
 
             for i in range(inputs.size(0)):
                 label = int(labels_cpu[i, 0])
@@ -232,6 +255,7 @@ def main():
                     save_dir = neg_dir
 
                 ll_for_sample = log_probs_cpu[i] if log_probs_cpu is not None else None
+                entropy_for_sample = entropies_cpu[i] if entropies_cpu is not None else None
 
                 # 调用绘图函数
                 plot_reconstruction(
@@ -241,7 +265,8 @@ def main():
                     label=label,
                     sample_index=sample_index,
                     output_dir=save_dir,
-                    log_likelihood=ll_for_sample
+                    log_likelihood=ll_for_sample,
+                    attention_entropy=entropy_for_sample
                 )
 
     logging.info("-" * 40)
