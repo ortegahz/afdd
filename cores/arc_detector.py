@@ -121,7 +121,7 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v1/best_e348_b0.9867.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e472_b0.9878.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v9 - dv37/afdd_models_mp/best_e501_b0.9864.pt'):
-    def _build_model(self, path_model='/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e2770_acc1.0012.pt'):
+    def _build_model(self, path_model='/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e7908_acc0.9058.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         # self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -1162,6 +1162,8 @@ class ArcDetector:
             self.alarm_idle_cnt = self.alarm_idle_cnt - 0.0005 if self.alarm_idle_cnt > 0 else self.alarm_idle_cnt
             self.peak_miss_cnt += 1  # Maintain idle detection logic
             return
+
+        peak_idx -= 1
 
         # It's a trigger point, process the window
         self.ini_peak_cnt += 1

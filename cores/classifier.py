@@ -576,7 +576,7 @@ class ClassifierCNNAE(ClassifierBase):
         with torch.no_grad():
             for batch_x in loader:
                 batch_x = batch_x.to(self.local_rank)
-                reconstructions, latents, _ = model_to_infer(batch_x)
+                reconstructions, latents, _, _ = model_to_infer(batch_x)
 
                 # Calculate mean squared error for each sample in the batch.
                 # Shape of batch_x & reconstructions: [batch, 1, seq_len]
