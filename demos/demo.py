@@ -46,7 +46,7 @@ def parse_args():
     #                     default='/media/manu/ST8000DM004-2U91/afdd/data/data_v26/data_ae/误动作 - o/电子变速手电钻800 W_20k.bin')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     # parser.add_argument('--db_key', default='default')
-    parser.add_argument('--addr', default='/media/manu/ST8000DM004-2U91/afdd/data/data_v26/tmp/')
+    parser.add_argument('--addr', default='/media/manu/ST8000DM004-2U91/afdd/data/data_v26/data_ae/')
     parser.add_argument('--dtr_type', default='DetectorWrapperV3BIN')
     parser.add_argument('--db_key', default=None)
     parser.add_argument('--dbo_type', default='DataV6')

@@ -368,8 +368,8 @@ class ClassifierCNNAE(ClassifierBase):
         super().__init__()
         self.local_rank = args.rank
         self.num_epochs = 8192
-        self.lr = 1e-5
-        self.ae_model_type = getattr(args, 'ae_model_type', 'unet')
+        self.lr = 1e-2
+        self.ae_model_type = getattr(args, 'ae_model_type', 'mem-flow-ae')
         model = None
         if self.ae_model_type == 'unet':
             model = NetAFDAE_UNet().to(self.local_rank)
@@ -385,14 +385,15 @@ class ClassifierCNNAE(ClassifierBase):
         elif self.ae_model_type == 'mem-flow-ae':
             model = NetAFDAE_Mem_Flow(latent_dim=128, mem_dim=2048).to(self.local_rank)
             self.use_mem_ae = True  # It's also a memory AE
-            self.sparsity_weight = 1e-5
-            self.flow_loss_weight = 1e-4  # Weight for the flow model's NLL loss
+            self.sparsity_weight = 1e-2
+            self.flow_loss_weight = 0.0  # 1e-4  # Weight for the flow model's NLL loss
         else:
             raise ValueError(f"Unsupported AE model type: {self.ae_model_type}")
 
         self.model = model
         # For flow models, it might be better to use separate optimizers, but one is fine for a start.
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
+        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.num_epochs, eta_min=1e-7)
 
         if self.local_rank == 0:
             logging.info(f"Initialized AE model of type: '{self.ae_model_type}'")
@@ -501,6 +502,8 @@ class ClassifierCNNAE(ClassifierBase):
                     epoch_flow_loss += flow_loss.item()
                 num_batches += 1
 
+            self.scheduler.step()
+
             avg_epoch_loss = epoch_loss / num_batches if num_batches > 0 else 0
             avg_recon_loss = epoch_recon_loss / num_batches if num_batches > 0 else 0
             avg_sparsity_loss = epoch_sparsity_loss / num_batches if num_batches > 0 else 0
@@ -510,8 +513,10 @@ class ClassifierCNNAE(ClassifierBase):
             epoch_duration = time.time() - epoch_start_time
 
             if self.rank == 0:
+                current_lr = self.optimizer.param_groups[0]['lr']
                 log_msg = (
                     f'Epoch [{epoch + 1}/{self.num_epochs}], '
+                    f'LR: {current_lr:.2e}, '
                     f'Time: {epoch_duration:.2f}s, '
                     f'Validation Acc: {val_accuracy:.4f}'
                 )

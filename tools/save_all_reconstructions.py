@@ -47,13 +47,14 @@ def parse_args():
     parser.add_argument(
         '--model_path',
         type=str,
-        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e2562_acc1.0001.pt",
+        # default="/media/manu/ST8000DM004-2U91/afdd/models/models_ae/v6 - mem flow ae/afdd_models_mp/ae_best_e2770_acc1.0012.pt",
+        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e7908_acc0.9058.pt",
         help="预训练的AutoEncoder模型 (.pt 文件) 的路径。"
     )
     parser.add_argument(
         '--test_data_path',
         type=str,
-        default="/home/manu/tmp/afd_pm_hdf5/train_data.h5",
+        default="/home/manu/tmp/afd_pm_hdf5_v3/train_data.h5",
         help="HDF5测试数据文件 (例如, test_data.h5) 的路径。"
     )
     parser.add_argument(
