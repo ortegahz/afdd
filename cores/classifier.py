@@ -18,8 +18,8 @@ from torch.testing import assert_close  # PyTorch ≥1.12 推荐
 from torch.utils.data import DataLoader
 from torch.utils.data import DataLoader
 
-from cores.features_generator import FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset
-from cores.features_generator import HDF5SPDataset, HDF5Dataset, HDF5SequentialSliceDataset
+from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
+                                      HDF5SPDataset, HDF5Dataset, HDF5SequentialSliceDataset)
 from cores.loss import HardExampleMiningFocalLoss, F
 from cores.nets import NetAFD, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem, NetAFDAE_Mem_Flow
 from utils.macros import MIN_VAL_TH
@@ -444,12 +444,14 @@ class ClassifierCNNAE(ClassifierBase):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
 
-        # dataset = HDF5Dataset(data['train_path'], self.features_generator.transform_sample_ae)
-        dataset = HDF5SPDataset(
-            data['train_path'],
-            self.features_generator.transform_sample_ae,
+        # 使用新的序贯滑窗数据集替换旧的随机采样数据集
+        # 步长 step 设为 seq_len // 4 提供了75%的重叠，是一种有效的数据增强
+        dataset = HDF5SequentialSliceDataset(
+            hdf5_file_path=data['train_path'],
+            transform=self.features_generator.transform_sample_ae,
             seq_len=self.features_generator.seq_len,
-            min_delta=MIN_VAL_TH)
+            step=self.features_generator.seq_len // 4  # 使用重叠滑窗进行数据增强
+        )
 
         is_distributed = isinstance(self.model, DDP)
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None
@@ -560,6 +562,10 @@ class ClassifierCNNAE(ClassifierBase):
                 - A 1D numpy array with the reconstruction score (MSE) for each sample.
                 - A 2D numpy array with the latent vector for each sample.
         """
+        # 确保模型处于评估模式
+        model_to_infer = self.model.module if isinstance(self.model, DDP) else self.model
+        model_to_infer.eval()
+
         # Use the same 'ae' transform as in training/evaluation
         dataset = InferenceDataset(
             x,
@@ -567,9 +573,6 @@ class ClassifierCNNAE(ClassifierBase):
             seq_len=self.features_generator.seq_len
         )
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-
-        model_to_infer = self.model.module if isinstance(self.model, DDP) else self.model
-        model_to_infer.eval()
 
         all_errors = []
         all_latents = []
@@ -585,6 +588,7 @@ class ClassifierCNNAE(ClassifierBase):
                 all_errors.append(errors.cpu().numpy())
                 all_latents.append(latents.cpu().numpy())
 
+        # 推理结束后，将模型恢复到训练模式
         model_to_infer.train()
 
         return np.concatenate(all_errors), np.concatenate(all_latents)
@@ -600,7 +604,7 @@ class ClassifierCNNAE(ClassifierBase):
         3. 使用真实标签和重构误差，通过ROC曲线分析找到一个最佳阈值（除非手动指定），
            该阈值旨在最大化Youden指数 J = TPR - FPR (真阳性率 - 假阳性率)。
         4. 如果样本的重构误差高于此阈值，则将其分类为异常（1），否则为正常（0）。
-        5. 基于这些预测计算总体准确率、正例准确率（召回率）和负例准确率（特异性）。
+        5. 基于这些预测计算F1分数、正例准确率（召回率）和负例准确率（特异性）。
         6. 打印详细的统计信息并返回总体准确率。
         """
         # 使用新的序贯切片数据集进行评估，确保覆盖所有数据
@@ -630,7 +634,7 @@ class ClassifierCNNAE(ClassifierBase):
             plot_target_label = None  # Invalidate plotting
 
         all_errors, all_labels = [], []
-        plotted_neg, plotted_pos = False, False
+        plotted = False
         sample_type_counter = 0  # 计数找到的目标类型样本数量
 
         with torch.no_grad():
@@ -642,7 +646,7 @@ class ClassifierCNNAE(ClassifierBase):
 
                 # --- 新增：查找并绘制指定次序的样本 ---
                 _save_dir = "/home/manu/tmp"
-                if plot_target_label is not None and (not plotted_neg or not plotted_pos) and self.rank == 0:
+                if plot_target_label is not None and not plotted and self.rank == 0:
                     # 找到当前批次中所有目标标签的索引
                     target_indices_in_batch = (labels.view(-1) == plot_target_label).nonzero(as_tuple=True)[0]
                     num_targets_in_batch = len(target_indices_in_batch)
@@ -692,8 +696,7 @@ class ClassifierCNNAE(ClassifierBase):
                             plt.savefig(plot_filename)
                             logging.info(f"Saved reconstruction plot to '{plot_filename}'")
                             plt.close(fig)
-                            plotted_pos = True if plot_target_label == 1 else plotted_pos
-                            plotted_neg = True if plot_target_label == 0 else plotted_neg
+                            plotted = True
                         except ImportError:
                             logging.warning(
                                 "Matplotlib not found, skipping plot. Install with 'pip install matplotlib'.")
@@ -704,7 +707,6 @@ class ClassifierCNNAE(ClassifierBase):
                 all_errors.extend(errors)
                 all_labels.extend(labels.cpu().numpy().flatten())
 
-        plotted = plotted_pos and plotted_neg
         # --- 新增：检查是否成功绘图 ---
         if plot_target_label is not None and not plotted and self.rank == 0:
             logging.warning(
@@ -756,7 +758,7 @@ class ClassifierCNNAE(ClassifierBase):
                 f"  [Eval Stats] Negatives(0): {num_negatives} samples, Acc: {acc_negatives:.4f} | "
                 f"Positives(1): {num_positives} samples, Acc: {acc_positives:.4f} | "
                 f"Threshold: {best_threshold:.6f} | "
-                f"F1 score: {f1:.6f}"
+                f"F1 Score: {f1:.6f}"
             )
         # =================================================================
 
