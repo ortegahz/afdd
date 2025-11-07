@@ -19,9 +19,10 @@ from torch.utils.data import DataLoader
 from torch.utils.data import DataLoader
 
 from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
-                                      HDF5Dataset, HDF5SequentialSliceDataset)
+                                      HDF5Dataset, HDF5SequentialSliceDataset, HDF5SPDataset)
 from cores.loss import HardExampleMiningFocalLoss, F
 from cores.nets import NetAFD, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem, NetAFDAE_Mem_Flow
+from utils.macros import MIN_VAL_TH
 
 
 class ClassifierBase:
@@ -407,8 +408,8 @@ class ClassifierCNNAE(ClassifierBase):
         elif self.ae_model_type == 'mem-flow-ae':
             model = NetAFDAE_Mem_Flow(latent_dim=128, mem_dim=2048).to(self.local_rank)
             self.use_mem_ae = True  # It's also a memory AE
-            self.sparsity_weight = 1e-4
-            self.flow_loss_weight = 0.0  # 1e-4  # Weight for the flow model's NLL loss
+            self.sparsity_weight = 1e-3
+            self.flow_loss_weight = 1e-4  # 1e-4  # Weight for the flow model's NLL loss
         else:
             raise ValueError(f"Unsupported AE model type: {self.ae_model_type}")
 
@@ -467,14 +468,20 @@ class ClassifierCNNAE(ClassifierBase):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
 
-        # 使用新的序贯滑窗数据集替换旧的随机采样数据集
-        # 步长 step 设为 seq_len // 4 提供了75%的重叠，是一种有效的数据增强
-        dataset = HDF5SequentialSliceDataset(
-            hdf5_file_path=data['train_path'],
-            transform=self.features_generator.transform_sample_ae,
+        # dataset = HDF5Dataset(data['train_path'], self.features_generator.transform_sample_ae)
+        dataset = HDF5SPDataset(
+            data['train_path'],
+            self.features_generator.transform_sample_ae,
             seq_len=self.features_generator.seq_len,
-            step=self.features_generator.seq_len // 8
-        )
+            min_delta=MIN_VAL_TH)
+        # # 使用新的序贯滑窗数据集替换旧的随机采样数据集
+        # # 步长 step 设为 seq_len // 4 提供了75%的重叠，是一种有效的数据增强
+        # dataset = HDF5SequentialSliceDataset(
+        #     hdf5_file_path=data['train_path'],
+        #     transform=self.features_generator.transform_sample_ae,
+        #     seq_len=self.features_generator.seq_len,
+        #     step=self.features_generator.seq_len // 8
+        # )
 
         is_distributed = isinstance(self.model, DDP)
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None
@@ -546,12 +553,17 @@ class ClassifierCNNAE(ClassifierBase):
                     f'Validation Acc: {val_accuracy:.4f}'
                 )
                 if self.ae_model_type == 'mem-flow-ae':
-                    w_sparsity = avg_sparsity_loss * self.sparsity_weight
-                    w_flow = avg_flow_loss * self.flow_loss_weight
+                    # Correctly calculate weighted losses for logging
+                    weighted_recon_loss = avg_recon_loss  # Assuming weight is 1.0
+                    weighted_sparsity_loss = avg_sparsity_loss * self.sparsity_weight
+                    weighted_flow_loss = avg_flow_loss * self.flow_loss_weight
+                    # For verification, their sum should be close to avg_epoch_loss
+                    calculated_total_loss = weighted_recon_loss + weighted_sparsity_loss + weighted_flow_loss
+
                     log_msg += (
-                        f' | Total Loss: {avg_epoch_loss:.8f}\n'
-                        f'        Raw Losses      -> Recon: {avg_recon_loss:.8f}, Sparsity: {avg_sparsity_loss:.8f}, Flow: {avg_flow_loss:.8f}\n'
-                        f'        Weighted Losses -> Recon: {avg_recon_loss:.8f}, Sparsity: {w_sparsity:.8f}, Flow: {w_flow:.8f}'
+                        f' | Total Loss: {avg_epoch_loss:.8f} (Calc: {calculated_total_loss:.8f})\n'
+                        f'        Components (Raw)      -> Recon: {avg_recon_loss:.8f}, Sparsity: {avg_sparsity_loss:.8f}, Flow: {avg_flow_loss:.8f}\n'
+                        f'        Components (Weighted) -> Recon: {weighted_recon_loss:.8f}, Sparsity: {weighted_sparsity_loss:.8f}, Flow: {weighted_flow_loss:.8f}'
                     )
                 elif self.use_mem_ae:
                     log_msg += (
