@@ -58,7 +58,7 @@ def parse_args():
         '--model_path',
         type=str,
         # default="/media/manu/ST8000DM004-2U91/afdd/models/models_ae/v6 - mem flow ae/afdd_models_mp/ae_best_e2770_acc1.0012.pt",
-        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e780_acc1.0643.pt",
+        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e304_acc5.3367.pt",
         help="预训练的AutoEncoder模型 (.pt 文件) 的路径。"
     )
     parser.add_argument(

@@ -138,6 +138,28 @@ class UpBlock(nn.Module):
         return self.conv(x)
 
 
+class SkipBottleneck(nn.Module):
+    """
+    在 Skip Connection 上施加一个瓶颈，以限制信息流。
+    比喻：在U-Net的“八车道高速公路”上设置一个“收费站/安检站”。
+    这强制解码器更多地依赖于来自记忆模块的潜在向量 z，而不是简单地“复制”编码器的特征，
+    从而增强模型对异常的敏感度。
+    结构: Conv 1x1 (压缩) -> ReLU -> Conv 1x1 (恢复)
+    """
+
+    def __init__(self, in_c, bottleneck_ratio=0.25):
+        super().__init__()
+        bottleneck_c = max(4, int(in_c * bottleneck_ratio))
+        self.bottleneck = nn.Sequential(
+            nn.Conv1d(in_c, bottleneck_c, kernel_size=1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(bottleneck_c, in_c, kernel_size=1, bias=False)
+        )
+
+    def forward(self, x):
+        return self.bottleneck(x)
+
+
 class MemoryModule(nn.Module):
     """
     记忆模块，用于存储正常模式的原型。
@@ -212,7 +234,7 @@ class NetAFDAE_UNet(nn.Module):
     4.  **上采样+卷积 (Upsample + Conv)**: 在解码器中使用，以减少转置卷积可能带来的棋盘格效应。
     """
 
-    def __init__(self, latent_dim=128):
+    def __init__(self, latent_dim=128, bottleneck_ratio=0.25):
         super().__init__()
         _channel_in = int(SAMPLE_RATE / 50)
         in_len = ((_channel_in // 32) + 1) * 32
@@ -226,6 +248,14 @@ class NetAFDAE_UNet(nn.Module):
         self.down2 = self._make_encoder_stage(32, 64)  # 224 -> 112
         self.down3 = self._make_encoder_stage(64, 128)  # 112 -> 56
         self.down4 = self._make_encoder_stage(128, 256)  # 56  -> 28
+
+        # --- Skip Connection Bottlenecks (新增) ---
+        # 对跳跃连接施加“瓶颈”，限制信息直接流向解码器，迫使其更多地依赖 z 向量。
+        # 这可以防止模型简单地“复印”输入，从而增强其对异常的敏感度。
+        skip_channels = [16, 32, 64, 128, 256]
+        self.skip_bottlenecks = nn.ModuleList([
+            SkipBottleneck(c, bottleneck_ratio=bottleneck_ratio) for c in skip_channels
+        ])
 
         # --- 瓶颈层 (Bottleneck) ---
         self.bottleneck_conv = self._make_encoder_stage(256, 512)  # 28 -> 14
@@ -261,7 +291,12 @@ class NetAFDAE_UNet(nn.Module):
         bottleneck = self.bottleneck_conv(s5)
 
         z = self.encoder_fc(bottleneck.flatten(1))
-        return z, [s1, s2, s3, s4, s5]
+
+        # 将原始的 skip connection 存储在一个列表中
+        skips_raw = [s1, s2, s3, s4, s5]
+        # 对每个 skip connection 应用瓶颈层
+        skips_bottlenecked = [self.skip_bottlenecks[i](s) for i, s in enumerate(skips_raw)]
+        return z, skips_bottlenecked
 
     def decode(self, z, skips):
         s1, s2, s3, s4, s5 = skips
@@ -290,10 +325,10 @@ class NetAFDAE_UNet_Mem(nn.Module):
     - 插入记忆模块以强制通过“正常模式”原型进行重构，增强对异常的敏感度。
     """
 
-    def __init__(self, latent_dim=128, mem_dim=2048):
+    def __init__(self, latent_dim=128, mem_dim=2048, bottleneck_ratio=0.25):
         super().__init__()
         # 实例化 U-Net 作为基础，但不直接作为子模块调用，而是复用其组件
-        self.base_unet = NetAFDAE_UNet(latent_dim)
+        self.base_unet = NetAFDAE_UNet(latent_dim, bottleneck_ratio=bottleneck_ratio)
 
         # 插入记忆模块
         self.memory_module = MemoryModule(mem_dim=mem_dim, fea_dim=latent_dim)
@@ -366,10 +401,10 @@ class NetAFDAE_Mem_Flow(nn.Module):
     不佳的问题，已将基础架构替换为U-Net，通过跳跃连接保留高频细节。
     """
 
-    def __init__(self, latent_dim=128, mem_dim=2048):
+    def __init__(self, latent_dim=128, mem_dim=2048, bottleneck_ratio=0.25):
         super().__init__()
         # 将基础架构从 NetAFDAE 更换为 NetAFDAE_UNet，以引入跳跃连接，增强高频重构能力
-        self.base_ae = NetAFDAE_UNet(latent_dim)
+        self.base_ae = NetAFDAE_UNet(latent_dim, bottleneck_ratio=bottleneck_ratio)
 
         # 插入记忆模块
         self.memory_module = MemoryModule(mem_dim=mem_dim, fea_dim=latent_dim)
