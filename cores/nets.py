@@ -362,13 +362,14 @@ class NetAFDAE_Mem(nn.Module):
 class NetAFDAE_Mem_Flow(nn.Module):
     """
     在 MemAE 的基础上，增加了 Normalizing Flow 模型来对潜空间进行概率密度建模。
-    这允许模型不仅通过重构误差，还通过潜向量的概率来检测异常。
+    这允许模型不仅通过重构误差，还通过潜向量的概率来检测异常。为了解决高频信号重构
+    不佳的问题，已将基础架构替换为U-Net，通过跳跃连接保留高频细节。
     """
 
     def __init__(self, latent_dim=128, mem_dim=2048):
         super().__init__()
-        # 复用原始的 NetAFDAE 结构作为编码器和解码器的基础
-        self.base_ae = NetAFDAE(latent_dim)
+        # 将基础架构从 NetAFDAE 更换为 NetAFDAE_UNet，以引入跳跃连接，增强高频重构能力
+        self.base_ae = NetAFDAE_UNet(latent_dim)
 
         # 插入记忆模块
         self.memory_module = MemoryModule(mem_dim=mem_dim, fea_dim=latent_dim)
@@ -376,25 +377,28 @@ class NetAFDAE_Mem_Flow(nn.Module):
         # 插入 Flow 模型
         self.flow_model = create_flow_model(latent_dim=latent_dim)
 
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
+    def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, list]:
+        """编码器现在返回潜向量 z 和跳跃连接列表 skips"""
         return self.base_ae.encode(x)
 
-    def decode(self, z: torch.Tensor) -> torch.Tensor:
-        return self.base_ae.decode(z)
+    def decode(self, z: torch.Tensor, skips: list) -> torch.Tensor:
+        """解码器现在需要潜向量 z 和跳跃连接列表 skips"""
+        return self.base_ae.decode(z, skips)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         完整的前向传播。
         返回: (重建信号, 原始潜向量, 注意力权重, 对数概率)
         """
-        z_query = self.encode(x)
+        # 1. 编码以获取查询向量 z_query 和跳跃连接
+        z_query, skips = self.encode(x)
+        # 2. 通过记忆模块检索得到 z_retrieved 和注意力权重
         z_retrieved, attention = self.memory_module(z_query)
-        reconstructed_x = self.decode(z_retrieved)
+        # 3. 使用检索到的 z_retrieved 和跳跃连接进行解码
+        reconstructed_x = self.decode(z_retrieved, skips)
+        # 4. 计算原始潜向量的对数概率
         log_prob = self.flow_model.log_prob(z_query)
         return reconstructed_x, z_query, attention, log_prob
-
-
-import torch.nn as nn
 
 
 # ------------- 基本积木 -------------

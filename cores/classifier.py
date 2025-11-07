@@ -389,7 +389,7 @@ class ClassifierCNNAE(ClassifierBase):
         """
         super().__init__()
         self.local_rank = args.rank
-        self.num_epochs = 8192 * 12
+        self.num_epochs = 8192
         self.lr = 1e-3
         self.ae_model_type = getattr(args, 'ae_model_type', 'mem-flow-ae')
         model = None
