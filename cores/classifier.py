@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import xgboost as xgb
-from sklearn.metrics import f1_score, accuracy_score, roc_curve
+from sklearn.metrics import f1_score, roc_curve
 from torch.ao.quantization import get_default_qat_qconfig, QConfigMapping
 from torch.ao.quantization.quantize_fx import fuse_fx, prepare_qat_fx, convert_fx
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -19,10 +19,9 @@ from torch.utils.data import DataLoader
 from torch.utils.data import DataLoader
 
 from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
-                                      HDF5SPDataset, HDF5Dataset, HDF5SequentialSliceDataset)
+                                      HDF5Dataset, HDF5SequentialSliceDataset)
 from cores.loss import HardExampleMiningFocalLoss, F
 from cores.nets import NetAFD, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem, NetAFDAE_Mem_Flow
-from utils.macros import MIN_VAL_TH
 
 
 class ClassifierBase:
@@ -355,6 +354,29 @@ class ClassifierCNN(ClassifierBase):
         return result
 
 
+class WeightedReconstructionLoss(nn.Module):
+    """
+    一种用于重构任务的损失函数，旨在关注重构误差较大的"硬"样本/像素点。
+    它通过将逐元素的L1损失提升到一个可配置的幂(alpha)来实现这一点。
+    类似于Focal Loss对分类任务的作用，此损失函数用于重构任务。
+
+    当 alpha = 1.0 时, 该损失等价于 nn.L1Loss。
+    当 alpha > 1.0 时, 它会不成比例地惩罚更大的误差，从而迫使模型
+    优先学习那些难以重构的部分。
+    """
+
+    def __init__(self, alpha=2.0):
+        super().__init__()
+        if alpha <= 0:
+            raise ValueError("alpha must be positive")
+        self.alpha = alpha
+
+    def forward(self, input, target):
+        error = torch.abs(input - target)
+        weighted_loss = torch.pow(error, self.alpha)
+        return weighted_loss.mean()
+
+
 class ClassifierCNNAE(ClassifierBase):
     def __init__(self, args, ddp=False):
         """
@@ -367,7 +389,7 @@ class ClassifierCNNAE(ClassifierBase):
         """
         super().__init__()
         self.local_rank = args.rank
-        self.num_epochs = 8192
+        self.num_epochs = 8192 * 12
         self.lr = 1e-3
         self.ae_model_type = getattr(args, 'ae_model_type', 'mem-flow-ae')
         model = None
@@ -385,7 +407,7 @@ class ClassifierCNNAE(ClassifierBase):
         elif self.ae_model_type == 'mem-flow-ae':
             model = NetAFDAE_Mem_Flow(latent_dim=128, mem_dim=2048).to(self.local_rank)
             self.use_mem_ae = True  # It's also a memory AE
-            self.sparsity_weight = 1e-3
+            self.sparsity_weight = 1e-4
             self.flow_loss_weight = 0.0  # 1e-4  # Weight for the flow model's NLL loss
         else:
             raise ValueError(f"Unsupported AE model type: {self.ae_model_type}")
@@ -409,7 +431,8 @@ class ClassifierCNNAE(ClassifierBase):
             self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
 
         # self.criterion = nn.MSELoss().to(self.local_rank)  # Reconstruction loss
-        self.criterion = nn.L1Loss().to(self.local_rank)  # Reconstruction loss
+        self.criterion = nn.L1Loss().to(self.local_rank)
+        # self.criterion = WeightedReconstructionLoss(alpha=8.0).to(self.local_rank)
         self.features_generator = FeaturesGeneratorCNN()
         self.rank = args.rank
         self.save_dir = args.save_dir
@@ -440,7 +463,7 @@ class ClassifierCNNAE(ClassifierBase):
         # 在所有记忆单元维度上求和，然后在批次维度上求平均
         return torch.mean(torch.sum(entropy, dim=1))
 
-    def train(self, data, loss_ckp=False):
+    def train(self, data, loss_ckp=True):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
 
@@ -450,7 +473,7 @@ class ClassifierCNNAE(ClassifierBase):
             hdf5_file_path=data['train_path'],
             transform=self.features_generator.transform_sample_ae,
             seq_len=self.features_generator.seq_len,
-            step=self.features_generator.seq_len // 4  # 使用重叠滑窗进行数据增强
+            step=self.features_generator.seq_len // 8
         )
 
         is_distributed = isinstance(self.model, DDP)
