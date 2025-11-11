@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -14,19 +15,11 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-# 导入项目相关模块
+# 导入项目模块
 from cores.nets import NetAFDAE, NetAFDAE_Mem_Flow, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem
 from cores.features_generator import FeaturesGeneratorCNN, HDF5SequentialSliceDataset
 
 # -- 提早检查依赖库 --
-try:
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D  # 3D绘图所需
-
-    MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    MATPLOTLIB_AVAILABLE = False
-
 try:
     from sklearn.manifold import TSNE
 
@@ -34,107 +27,136 @@ try:
 except ImportError:
     SKLEARN_AVAILABLE = False
 
+try:
+    import plotly.graph_objects as go
+
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+
 
 def setup_logging():
     """配置日志记录器"""
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
-        stream=sys.stdout
-    )
+        stream=sys.stdout)
 
 
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="使用预训练的AutoEncoder模型提取特征，并通过t-SNE进行3D可视化。"
-    )
+        description="使用预训练的AutoEncoder模型提取特征，并通过t-SNE进行交互式3D可视化。")
     parser.add_argument(
         '--model_path',
         type=str,
-        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e152_acc0.9884.pt",
-        help="预训练的AutoEncoder模型 (.pt 文件) 的路径。"
-    )
+        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e272_acc0.9903.pt",
+        help="预训练的AutoEncoder模型 (.pt 文件) 的路径。")
     parser.add_argument(
         '--data_path',
         type=str,
         default="/home/manu/tmp/afd_pm_hdf5/test_data.h5",
-        help="HDF5数据文件 (例如, test_data.h5) 的路径。"
-    )
+        help="HDF5数据文件 (例如, test_data.h5) 的路径。")
     parser.add_argument(
         '--ae_model_type',
         type=str,
         default='ae',
         choices=['ae', 'unet', 'mem-ae', 'unet-mem', 'mem-flow-ae'],
-        help="要加载的自编码器模型架构类型。"
-    )
+        help="要加载的自编码器模型架构类型。")
     parser.add_argument(
         '--output_file',
         type=str,
-        default="/home/manu/tmp/afdd_ae_results/tsne_visualization.png",
-        help="用于保存t-SNE 3D散点图的输出文件路径。"
-    )
+        default="/home/manu/tmp/afdd_ae_results/tsne_visualization.html",
+        help="用于保存t-SNE交互式3D散点图的输出HTML文件路径。")
     parser.add_argument(
         '--device',
         type=str,
         default="cuda:0",
-        help="运行评估的设备，例如 'cpu' or 'cuda:0'。"
-    )
+        help="运行评估的设备，例如 'cpu' or 'cuda:0'。")
     parser.add_argument(
         '--batch_size',
         type=int,
         default=256,
-        help="处理数据时使用的批大小。"
-    )
+        help="处理数据时使用的批大小。")
     parser.add_argument(
         '--perplexity',
         type=int,
         default=30,
-        help="t-SNE算法的perplexity参数。"
-    )
+        help="t-SNE算法的perplexity参数。")
     parser.add_argument(
         '--max_samples',
         type=int,
         default=10000,
-        help="用于t-SNE可视化的最大样本数。设为-1表示使用所有样本。"
-    )
+        help="用于t-SNE可视化的最大样本数。设为-1表示使用所有样本。")
+    parser.add_argument(
+        '--show_plot',
+        action='store_true',
+        help="在浏览器中直接打开生成的交互式t-SNE图。")
     return parser.parse_args()
 
 
-def plot_tsne_3d(tsne_data, labels, output_path, title='Latent Space 3D t-SNE Visualization'):
+def plot_tsne_3d(tsne_data, labels, output_path, title='Latent Space 3D t-SNE Visualization', show_plot=False):
     """
-    生成并保存一个3D t-SNE散点图。
+    使用Plotly生成并保存一个可交互的3D t-SNE散点图。
     """
-    fig = plt.figure(figsize=(12, 10))
-    ax = fig.add_subplot(111, projection='3d')
+    fig = go.Figure()
 
     # 分离正负样本的索引
-    pos_indices = (labels == 1)
-    neg_indices = (labels == 0)
+    pos_indices = np.where(labels == 1)[0]
+    neg_indices = np.where(labels == 0)[0]
 
     # 绘制负例（正常）样本
-    ax.scatter(tsne_data[neg_indices, 0], tsne_data[neg_indices, 1], tsne_data[neg_indices, 2],
-               c='blue', label='Negative (Normal)', alpha=0.5, s=15, marker='o')
+    fig.add_trace(go.Scatter3d(
+        x=tsne_data[neg_indices, 0],
+        y=tsne_data[neg_indices, 1],
+        z=tsne_data[neg_indices, 2],
+        mode='markers',
+        marker=dict(
+            size=3,
+            color='blue',
+            opacity=0.6,
+        ),
+        name='Negative (Normal)'
+    ))
 
     # 绘制正例（故障）样本
-    ax.scatter(tsne_data[pos_indices, 0], tsne_data[pos_indices, 1], tsne_data[pos_indices, 2],
-               c='red', label='Positive (Fault)', alpha=0.7, s=20, marker='x')
+    fig.add_trace(go.Scatter3d(
+        x=tsne_data[pos_indices, 0],
+        y=tsne_data[pos_indices, 1],
+        z=tsne_data[pos_indices, 2],
+        mode='markers',
+        marker=dict(
+            size=3.5,
+            color='red',
+            opacity=0.8,
+        ),
+        name='Positive (Fault)'
+    ))
 
-    ax.set_title(title, fontsize=16)
-    ax.set_xlabel('t-SNE Dimension 1')
-    ax.set_ylabel('t-SNE Dimension 2')
-    ax.set_zlabel('t-SNE Dimension 3')
-    ax.legend(loc='upper left')
-    ax.grid(True)
+    fig.update_layout(
+        title=dict(text=title, x=0.5),
+        scene=dict(
+            xaxis_title='t-SNE Dimension 1',
+            yaxis_title='t-SNE Dimension 2',
+            zaxis_title='t-SNE Dimension 3'
+        ),
+        margin=dict(l=0, r=0, b=0, t=40),
+        legend_title_text='Sample Type'
+    )
 
     # 确保输出目录存在
     output_dir = os.path.dirname(output_path)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close(fig)
-    logging.info(f"t-SNE图已保存至: {output_path}")
+    # 保存为HTML文件
+    fig.write_html(output_path)
+    logging.info(f"交互式t-SNE图已保存至: {output_path}")
+
+    # 如果用户选择，则在浏览器中打开
+    if show_plot:
+        logging.info("在默认浏览器中打开交互式图表...")
+        fig.show()
 
 
 def main():
@@ -142,8 +164,8 @@ def main():
     setup_logging()
     args = parse_args()
 
-    if not MATPLOTLIB_AVAILABLE:
-        logging.error("Matplotlib 未安装。请使用 'pip install matplotlib' 命令安装。")
+    if not PLOTLY_AVAILABLE:
+        logging.error("Plotly 未安装。请使用 'pip install plotly' 命令安装。")
         return
     if not SKLEARN_AVAILABLE:
         logging.error("scikit-learn 未安装。请使用 'pip install scikit-learn' 命令安装。")
@@ -208,13 +230,9 @@ def main():
             inputs = inputs.to(device)
 
             # 根据模型类型提取潜在向量
-            if args.ae_model_type == 'unet':
-                # 对于UNet，encoder的输出是多个尺度的特征图，我们取最深层的（bottleneck）
-                latent_vectors = model.encoder(inputs)[-1]
-            else:
-                # 对于其他模型，通常第二个输出是latent vector 'z'
-                model_outputs = model(inputs)
-                latent_vectors = model_outputs[1]
+            # 我们约定对于所有自编码器类的模型，其 forward 方法返回的第二个元素 ([1]) 是潜在特征 z
+            model_outputs = model(inputs)
+            latent_vectors = model_outputs[1]
 
             # 将特征向量展平为 [N, feature_dim]
             if latent_vectors.dim() > 2:
@@ -259,7 +277,7 @@ def main():
         tsne_results = tsne.fit_transform(features_np)
         logging.info("t-SNE变换完成。")
 
-        plot_tsne_3d(tsne_results, labels_np, args.output_file)
+        plot_tsne_3d(tsne_results, labels_np, args.output_file, show_plot=args.show_plot)
     else:
         logging.error("无法执行t-SNE，因为样本数量过少 (<=1)。")
 
