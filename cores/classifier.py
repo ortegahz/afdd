@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader
 from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
                                       HDF5Dataset, HDF5SequentialSliceDataset, HDF5SPDataset)
 from cores.loss import HardExampleMiningFocalLoss, F
-from cores.nets import NetAFD, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem, NetAFDAE_Mem_Flow
+from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem, NetAFDAE_Mem_Flow
 from utils.macros import MIN_VAL_TH
 
 
@@ -392,9 +392,12 @@ class ClassifierCNNAE(ClassifierBase):
         self.local_rank = args.rank
         self.num_epochs = 8192
         self.lr = 1e-3
-        self.ae_model_type = getattr(args, 'ae_model_type', 'mem-flow-ae')
+        self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         model = None
-        if self.ae_model_type == 'unet':
+        if self.ae_model_type == 'ae':
+            model = NetAFDAE().to(self.local_rank)
+            self.use_mem_ae = False
+        elif self.ae_model_type == 'unet':
             model = NetAFDAE_UNet().to(self.local_rank)
             self.use_mem_ae = False
         elif self.ae_model_type == 'mem-ae':

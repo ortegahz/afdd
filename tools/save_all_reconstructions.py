@@ -17,7 +17,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from cores.nets import NetAFDAE_Mem_Flow, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem
+from cores.nets import NetAFDAE, NetAFDAE_Mem_Flow, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem
 from cores.features_generator import FeaturesGeneratorCNN, HDF5SequentialSliceDataset
 
 # 提早检查matplotlib，如果未安装则给出明确错误
@@ -58,21 +58,21 @@ def parse_args():
         '--model_path',
         type=str,
         # default="/media/manu/ST8000DM004-2U91/afdd/models/models_ae/v6 - mem flow ae/afdd_models_mp/ae_best_e2770_acc1.0012.pt",
-        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e304_acc5.3367.pt",
+        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e242_acc0.9906.pt",
         help="预训练的AutoEncoder模型 (.pt 文件) 的路径。"
     )
     parser.add_argument(
         '--test_data_path',
         type=str,
-        # default="/home/manu/tmp/afd_pm_hdf5/train_data.h5",
-        default="/home/manu/tmp/afd_pm_hdf5_v3/train_data.h5",
+        default="/home/manu/tmp/afd_pm_hdf5/train_data.h5",
+        # default="/home/manu/tmp/afd_pm_hdf5_v3/train_data.h5",
         help="HDF5测试数据文件 (例如, test_data.h5) 的路径。"
     )
     parser.add_argument(
         '--ae_model_type',
         type=str,
-        default='mem-flow-ae',
-        choices=['unet', 'mem-ae', 'unet-mem', 'mem-flow-ae'],
+        default='ae',
+        choices=['ae', 'unet', 'mem-ae', 'unet-mem', 'mem-flow-ae'],
         help="要加载的自编码器模型架构类型。"
     )
     parser.add_argument(
@@ -174,6 +174,7 @@ def main():
 
     # --- 2. 加载模型 ---
     model_map = {
+        'ae': NetAFDAE,
         'unet': NetAFDAE_UNet,
         'mem-ae': NetAFDAE_Mem,
         'unet-mem': NetAFDAE_UNet_Mem,

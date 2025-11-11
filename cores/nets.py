@@ -5,6 +5,7 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from thop import profile
 
 from utils.macros import SAMPLE_RATE
@@ -493,25 +494,6 @@ class NetAFD(nn.Module):
         return x, feat
 
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from typing import Tuple  # <--- 1. 导入 Tuple
-
-
-# ------------- 基本积木（编码器和解码器通用） -------------
-def CBR(in_c, out_c, k=3, s=1, p=1):  # Conv-BN-ReLU
-    """
-    一个标准的卷积块，用于编码器。
-    """
-    return nn.Sequential(
-        nn.Conv1d(in_c, out_c, k, stride=s, padding=p, bias=False),
-        nn.BatchNorm1d(out_c),
-        nn.ReLU(inplace=True)
-    )
-
-
-# ------------- 自编码器解码器积木 -------------
 def DeCBR(in_c, out_c, k=3, s=2, p=1, op=1):  # DeConv-BN-ReLU
     """
     转置卷积块，用于解码器中通过学习来上采样。
@@ -605,14 +587,15 @@ class NetAFDAE(nn.Module):
         reconstructed_x = self.decoder_stage1(x)
         return reconstructed_x
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:  # <--- 2. 修改此处
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, None]:
         """
         完整的前向传播。
-        返回: (重建的信号, 潜在向量)
+        返回: (重建的信号, 潜在向量, None)
+        增加一个 None 输出以统一接口。
         """
         z = self.encode(x)
         reconstructed_x = self.decode(z)
-        return reconstructed_x, z
+        return reconstructed_x, z, None
 
 
 import torch.nn as nn
