@@ -4,6 +4,8 @@ import glob
 import os
 import shutil
 
+from utils.utils import make_dirs
+
 
 def collect_and_copy_bins(source_dir, dest_dir):
     """
@@ -16,7 +18,7 @@ def collect_and_copy_bins(source_dir, dest_dir):
         return
 
     # --- 2. 创建目标目录 (如果不存在) ---
-    os.makedirs(dest_dir, exist_ok=True)
+    make_dirs(dest_dir, reset=True)
     print(f"源目录: {os.path.abspath(source_dir)}")
     print(f"目标目录: {os.path.abspath(dest_dir)}")
     print("-" * 40)
@@ -54,7 +56,7 @@ def collect_and_copy_bins(source_dir, dest_dir):
 
 if __name__ == "__main__":
     # --- 配置区域 ---
-    SOURCE_FOLDER = "/media/manu/ST8000DM004-2U91/tmp/fault-arc/"  # 包含.bin文件的源文件夹
+    SOURCE_FOLDER = "/media/manu/ST8000DM004-2U91/tmp/fault-arc-pick/"  # 包含.bin文件的源文件夹
     DESTINATION_FOLDER = "/media/manu/ST8000DM004-2U91/tmp/fault-arc-sorted"  # 存放所有.bin文件的目标文件夹
     # -------------------
 

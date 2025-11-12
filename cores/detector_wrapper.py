@@ -32,7 +32,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
 
         # --- Configurable saving options ---
         self.svm_label_file = '/media/manu/ST8000DM004-2U91/tmp/afd'
-        self.save_as_svm, self.save_as_h5 = False, True
+        self.save_as_svm, self.save_as_h5 = True, True
         self.h5_path = '/media/manu/ST8000DM004-2U91/tmp/afd.h5'
 
         if self.save_as_svm and os.path.exists(self.svm_label_file):
@@ -63,7 +63,8 @@ class DetectorWrapperV0(DetectorWrapperBase):
                 self.arc_detector.infer_v6(feat_sample=feat_sample, blacklist_sample=blacklist_sample)
                 # self.arc_detector.infer_v5(feat_sample=feat_sample)  # TAG: for mcu
                 # self.arc_detector.infer_v3(feat_sample=feat_sample)
-                # self.arc_detector.sample()
+            if self.save_as_svm:
+                self.arc_detector.sample()
                 # self.arc_detector.sample_ae()
                 # self.arc_detector.sample(pos_only=True)
                 # self.arc_detector.sample_pos_v0()
