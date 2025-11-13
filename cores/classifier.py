@@ -16,9 +16,8 @@ from torch.ao.quantization import get_default_qat_qconfig, QConfigMapping
 from torch.ao.quantization.quantize_fx import fuse_fx, prepare_qat_fx, convert_fx
 from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing import assert_close  # PyTorch ≥1.12 推荐
-from torch.utils.data import DataLoader
-from torch.utils.data import DataLoader, TensorDataset
+from torch.testing import assert_close
+from torch.utils.data import DataLoader, TensorDataset, Subset
 
 from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
                                       HDF5Dataset, HDF5SequentialSliceDataset, HDF5SPDataset)
@@ -388,7 +387,7 @@ class MemoryHead(nn.Module):
     - V2: 增加了一个MLP来转换潜向量，以增加可学习参数和模型的表达能力。
     """
 
-    def __init__(self, latent_dim, mem_dim=512, hidden_dim=256, num_layers=8):
+    def __init__(self, latent_dim, mem_dim=512, hidden_dim=256, num_layers=8, initial_memory=None):
         super().__init__()
         # --- MLP for latent space transformation ---
         # 增加一个多层感知机 (MLP) 来转换输入特征 z, 增加模型的复杂度。
@@ -408,8 +407,15 @@ class MemoryHead(nn.Module):
         self.mlp = nn.Sequential(*layers)
 
         # --- Memory Matrix (as before) ---
-        self.memory = nn.Parameter(torch.randn(mem_dim, latent_dim))
-        nn.init.kaiming_uniform_(self.memory)  # 使用较好的初始化
+        if initial_memory is not None:
+            if initial_memory.shape != (mem_dim, latent_dim):
+                raise ValueError(
+                    f"Shape of initial_memory {initial_memory.shape} does not match expected shape {(mem_dim, latent_dim)}")
+            self.memory = nn.Parameter(initial_memory)
+            logging.info("Initialized memory head with provided initial memory (e.g., from K-Means).")
+        else:
+            self.memory = nn.Parameter(torch.randn(mem_dim, latent_dim))
+            nn.init.kaiming_uniform_(self.memory)  # 使用较好的初始化
 
     def forward(self, z):
         """
@@ -438,12 +444,15 @@ class ClassifierCNNAE(ClassifierBase):
             ddp (bool): Flag for distributed data parallel.
         """
         super().__init__()
-        self.local_rank = args.rank
         self.num_epochs = 8192 * 64
-        self.lr = 1e-5
+        self.lr = 1e-4
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 2)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
+        self.diversity_loss_weight = 0.5
+        self.features_generator = FeaturesGeneratorCNN()
+        self.rank = args.rank
+        self.local_rank = args.rank
 
         make_dirs(args.save_dir, reset=True)
 
@@ -499,11 +508,54 @@ class ClassifierCNNAE(ClassifierBase):
                 raise FileNotFoundError(f"Base model checkpoint not found at a presumed path: {base_ckpt_path}")
             self._load_checkpoint_v0(base_ckpt_path, model=self.model, strict=False)
 
+            latent_dim = self.model.get_latent_dim()
             if head_ckpt_path and os.path.exists(head_ckpt_path):
+                self.memory_head = MemoryHead(latent_dim=latent_dim, mem_dim=512).to(self.local_rank)
                 self._load_checkpoint_v0(head_ckpt_path, model=self.memory_head, strict=True)
                 logging.info(f"Resuming phase 2 with loaded memory head from: {head_ckpt_path}")
             else:
-                logging.info("Starting phase 2 with a fresh memory head (or head checkpoint not found).")
+                logging.info("No head checkpoint found. Initializing new memory head.")
+                initial_memory_centers = None
+                if self.rank == 0:  # Perform clustering only on rank 0
+                    logging.info("Attempting K-Means clustering to initialize memory slots...")
+                    try:
+                        from sklearn.cluster import KMeans
+                        train_data_path = os.path.join(args.load_dir, 'train_data.h5')
+                        if not os.path.exists(train_data_path):
+                            raise FileNotFoundError(f"Training data for K-Means not found: {train_data_path}")
+
+                        temp_dataset = HDF5SequentialSliceDataset(train_data_path,
+                                                                  self.features_generator.transform_sample_ae,
+                                                                  seq_len=self.features_generator.seq_len,
+                                                                  step=self.features_generator.seq_len,
+                                                                  only_normal=True)
+                        num_samples = min(20000, len(temp_dataset))
+                        indices = np.random.choice(len(temp_dataset), num_samples, replace=False)
+                        subset = Subset(temp_dataset, indices)
+                        temp_loader = DataLoader(dataset=subset, batch_size=2048, shuffle=False)
+
+                        self.model.eval()
+                        all_latents = []
+                        with torch.no_grad():
+                            for inputs, _ in temp_loader:
+                                _, latents, _ = self.model(inputs.to(self.local_rank))
+                                all_latents.append(latents.cpu().numpy())
+
+                        if all_latents:
+                            all_latents_np = np.concatenate(all_latents, axis=0)
+                            n_clusters = 512
+                            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10, max_iter=100)
+                            kmeans.fit(all_latents_np)
+                            initial_memory_centers = torch.from_numpy(kmeans.cluster_centers_).float()
+                            logging.info(f"Memory bank initialized with {n_clusters} K-Means cluster centers.")
+                    except ImportError:
+                        logging.warning("scikit-learn not found. Skipping K-Means. pip install scikit-learn.")
+                    except Exception as e:
+                        logging.error(f"K-Means failed: {e}. Falling back to random init.")
+                if ddp:
+                    obj_list = [initial_memory_centers] if self.rank == 0 else [None]
+                    dist.broadcast_object_list(obj_list, src=0)
+                    initial_memory_centers = obj_list[0]
 
             # 4. 冻结基础AE并配置优化器
             self.model.eval()
@@ -533,9 +585,7 @@ class ClassifierCNNAE(ClassifierBase):
         # self.criterion = nn.MSELoss().to(self.local_rank)  # Reconstruction loss
         self.criterion = nn.L1Loss().to(self.local_rank)
         # self.criterion = WeightedReconstructionLoss(alpha=8.0).to(self.local_rank)
-        self.features_generator = FeaturesGeneratorCNN()
-        self.rank = args.rank
-        self.save_dir = args.save_dir
+        self.save_dir = args.save_dir  # type: ignore
 
     def _load_checkpoint_v0(self, checkpoint_path, model=None, strict=True):
         target_model = self.model if model is None else model
@@ -549,7 +599,8 @@ class ClassifierCNNAE(ClassifierBase):
             state_dict = new_state_dict
         # strict=False allows loading only encode part if a classifier model is provided
         target_model.load_state_dict(state_dict, strict=strict)
-        logging.info(f'Loaded checkpoint into {target_model.__class__.__name__} from {checkpoint_path} (strict={strict})')
+        logging.info(
+            f'Loaded checkpoint into {target_model.__class__.__name__} from {checkpoint_path} (strict={strict})')
 
     def _entropy_loss(self, attention_weights: torch.Tensor) -> torch.Tensor:
         """
@@ -651,40 +702,47 @@ class ClassifierCNNAE(ClassifierBase):
             if is_distributed:
                 train_sampler.set_epoch(epoch)
 
-            epoch_entropy_loss = 0.0
+            epoch_total_loss, epoch_entropy_loss, epoch_diversity_loss = 0.0, 0.0, 0.0
             num_batches = 0
             for (inputs,) in loader:  # TensorDataset returns a tuple
                 inputs = inputs.to(self.local_rank)
 
                 with torch.no_grad():
-                    latents = self.model.encode(inputs)
+                    # The encode method returns a tuple, extract the latent tensor (second element)
+                    _, latents, _ = self.model(inputs)
 
                 attention_weights = self.memory_head(latents)
+
                 entropy_loss = self._entropy_loss(attention_weights)
+                diversity_loss = self._diversity_loss()
+                total_loss = entropy_loss + self.diversity_loss_weight * diversity_loss
 
                 self.optimizer.zero_grad()
-                entropy_loss.backward()
+                total_loss.backward()
                 self.optimizer.step()
 
+                epoch_total_loss += total_loss.item()
                 epoch_entropy_loss += entropy_loss.item()
+                epoch_diversity_loss += diversity_loss.item()
                 num_batches += 1
 
             self.scheduler.step()
 
-            avg_epoch_loss = epoch_entropy_loss / num_batches if num_batches > 0 else 0
+            avg_epoch_total_loss = epoch_total_loss / num_batches if num_batches > 0 else 0
+            avg_epoch_entropy_loss = epoch_entropy_loss / num_batches if num_batches > 0 else 0
+            avg_epoch_diversity_loss = epoch_diversity_loss / num_batches if num_batches > 0 else 0
             epoch_duration = time.time() - epoch_start_time
 
             if self.rank == 0:
                 current_lr = self.optimizer.param_groups[0]['lr']
                 logging.info(
                     f'Phase 2 - Epoch [{epoch + 1}/{self.num_epochs}], '
-                    f'LR: {current_lr:.2e}, '
-                    f'Time: {epoch_duration:.2f}s, '
-                    f'Avg Entropy Loss: {avg_epoch_loss:.8f}'
+                    f'LR: {current_lr:.2e}, Time: {epoch_duration:.2f}s, '
+                    f'Loss: {avg_epoch_total_loss:.8f} (E: {avg_epoch_entropy_loss:.8f}, D: {avg_epoch_diversity_loss:.8f})'
                 )
 
-                if avg_epoch_loss < best_loss:
-                    best_loss = avg_epoch_loss
+                if avg_epoch_total_loss < best_loss:
+                    best_loss = avg_epoch_total_loss
                     # In phase 2, we save both the memory_head and the base model
                     model_to_save = self.model.module if isinstance(self.model, DDP) else self.model
                     head_to_save = self.memory_head.module if is_distributed else self.memory_head
@@ -697,7 +755,29 @@ class ClassifierCNNAE(ClassifierBase):
                     torch.save(model_to_save.state_dict(), base_path)
                     torch.save(head_to_save.state_dict(), head_path)
 
-                    logging.info(f'Saved new best Phase 2 models with loss: {best_loss:.4f}')
+                    logging.info(f'Saved new best Phase 2 models with loss: {best_loss:.4f} to {head_path}')
+
+    def _diversity_loss(self) -> torch.Tensor:
+        """
+        Calculates a diversity loss to encourage memory slots to be dissimilar.
+        This is done by penalizing the cosine similarity between memory vectors.
+        """
+        if not hasattr(self, 'memory_head'):
+            return torch.tensor(0.0).to(self.local_rank)
+
+        # Get the memory bank from the (potentially DDP-wrapped) memory_head
+        memory_bank = self.memory_head.module.memory if self.ddp and isinstance(self.memory_head,
+                                                                                DDP) else self.memory_head.memory
+
+        # Normalize memory vectors to unit length
+        mem_normalized = F.normalize(memory_bank, p=2, dim=1)
+
+        # Calculate the cosine similarity matrix (M * M^T)
+        cos_sim_matrix = torch.matmul(mem_normalized, mem_normalized.t())
+
+        # We want to minimize off-diagonal similarities. Subtract the identity matrix.
+        identity = torch.eye(cos_sim_matrix.size(0), device=cos_sim_matrix.device)
+        return torch.mean((cos_sim_matrix - identity) ** 2)
 
     def _train_phase1(self, data, loss_ckp=True):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
