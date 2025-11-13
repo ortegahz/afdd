@@ -237,6 +237,7 @@ class NetAFDAE_UNet(nn.Module):
 
     def __init__(self, latent_dim=128, bottleneck_ratio=0.25):
         super().__init__()
+        self.latent_dim = latent_dim
         _channel_in = int(SAMPLE_RATE / 50)
         in_len = ((_channel_in // 32) + 1) * 32
         assert in_len == 448
@@ -317,6 +318,9 @@ class NetAFDAE_UNet(nn.Module):
         reconstructed_x = self.decode(z, skips)
         # 返回一个额外的 None 以统一接口
         return reconstructed_x, z, None
+
+    def get_latent_dim(self):
+        return self.latent_dim
 
 
 class NetAFDAE_UNet_Mem(nn.Module):
@@ -516,6 +520,7 @@ class NetAFDAE(nn.Module):
 
     def __init__(self, latent_dim=128):
         super().__init__()
+        self.latent_dim = latent_dim
         # 确认输入长度与原始模型一致
         _channel_in = int(SAMPLE_RATE / 50)
         in_len = ((_channel_in // 32) + 1) * 32
@@ -596,6 +601,9 @@ class NetAFDAE(nn.Module):
         z = self.encode(x)
         reconstructed_x = self.decode(z)
         return reconstructed_x, z, None
+
+    def get_latent_dim(self):
+        return self.latent_dim
 
 
 import torch.nn as nn

@@ -34,6 +34,10 @@ def parse_args():
                         help="Type of AutoEncoder architecture to use.")
     parser.add_argument('--local_rank', type=int, default=0, help='Local rank for distributed training')
     parser.add_argument('--qat', default=False, help='enable quant-aware training')
+    parser.add_argument('--training_phase', type=int, default=2, choices=[1, 2],
+                        help="Training phase for AE models: 1 for reconstruction, 2 for memory head training.")
+    parser.add_argument('--hard_example_threshold', type=float, default=0.8,
+                        help="For phase 2, percentile threshold for hard example mining (e.g., 0.8 means top 20% hardest).")
     return parser.parse_args()
 
 

@@ -5,6 +5,7 @@ import os
 import time
 
 import numpy as np
+import torch.distributed as dist
 import onnxruntime as ort
 import torch
 import torch.nn as nn
@@ -15,12 +16,13 @@ from torch.ao.quantization import get_default_qat_qconfig, QConfigMapping
 from torch.ao.quantization.quantize_fx import fuse_fx, prepare_qat_fx, convert_fx
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing import assert_close  # PyTorch ≥1.12 推荐
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.data import DataLoader
 
 from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
                                       HDF5Dataset, HDF5SequentialSliceDataset, HDF5SPDataset)
 from cores.loss import HardExampleMiningFocalLoss, F
+from torch.nn import functional as F
 from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem, NetAFDAE_Mem_Flow
 from utils.macros import MIN_VAL_TH
 
@@ -378,6 +380,29 @@ class WeightedReconstructionLoss(nn.Module):
         return weighted_loss.mean()
 
 
+class MemoryHead(nn.Module):
+    """
+    一个独立的记忆头，作用于已经提取的latent space上。
+    设计用于在冻结的encoder之上进行训练。
+    """
+
+    def __init__(self, latent_dim, mem_dim=512):
+        super().__init__()
+        self.memory = nn.Parameter(torch.randn(mem_dim, latent_dim))
+        nn.init.kaiming_uniform_(self.memory)  # 使用较好的初始化
+
+    def forward(self, z):
+        """
+        z: latent vector, shape [batch_size, latent_dim]
+        """
+        # 使用归一化的点积（余弦相似度）计算注意力
+        # 这比简单的矩阵乘法更稳定
+        attention = F.linear(F.normalize(z, dim=1), F.normalize(self.memory, dim=1))
+        attention_weights = F.softmax(attention, dim=1)
+
+        return attention_weights
+
+
 class ClassifierCNNAE(ClassifierBase):
     def __init__(self, args, ddp=False):
         """
@@ -393,6 +418,10 @@ class ClassifierCNNAE(ClassifierBase):
         self.num_epochs = 8192
         self.lr = 1e-3
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
+        self.training_phase = getattr(args, 'training_phase', 1)
+        self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
+
+        # --- Phase-dependent model initialization ---
         model = None
         if self.ae_model_type == 'ae':
             model = NetAFDAE().to(self.local_rank)
@@ -400,39 +429,62 @@ class ClassifierCNNAE(ClassifierBase):
         elif self.ae_model_type == 'unet':
             model = NetAFDAE_UNet().to(self.local_rank)
             self.use_mem_ae = False
-        elif self.ae_model_type == 'mem-ae':
-            model = NetAFDAE_Mem(latent_dim=128, mem_dim=2048).to(self.local_rank)
-            self.use_mem_ae = True
-            self.sparsity_weight = 1e-4
-        elif self.ae_model_type == 'unet-mem':
-            model = NetAFDAE_UNet_Mem(latent_dim=128, mem_dim=2048).to(self.local_rank)
-            self.use_mem_ae = True
-            self.sparsity_weight = 1e-4
-        elif self.ae_model_type == 'mem-flow-ae':
-            model = NetAFDAE_Mem_Flow(latent_dim=128, mem_dim=2048).to(self.local_rank)
-            self.use_mem_ae = True  # It's also a memory AE
-            self.sparsity_weight = 1e-2
-            self.flow_loss_weight = 1e-2  # 1e-4  # Weight for the flow model's NLL loss
+        elif self.ae_model_type in ['mem-ae', 'unet-mem', 'mem-flow-ae']:
+            logging.warning("Phase 1 training is for reconstruction. Forcing a non-memory AE model.")
+            self.ae_model_type = 'ae' if 'unet' not in self.ae_model_type else 'unet'
+            model = NetAFDAE().to(self.local_rank) if self.ae_model_type == 'ae' else NetAFDAE_UNet().to(
+                self.local_rank)
+            self.use_mem_ae = False
         else:
-            raise ValueError(f"Unsupported AE model type: {self.ae_model_type}")
+            raise ValueError(f"Unsupported AE model type for Phase 1: {self.ae_model_type}")
 
-        self.model = model
-        # For flow models, it might be better to use separate optimizers, but one is fine for a start.
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
+        if self.training_phase == 1:
+            self.model = model
+            self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
+        else:
+            # 在阶段2，我们加载基础AE，冻结它，并只训练MemoryHead
+            if not self.use_mem_ae:
+                logging.warning("Phase 2 is for memory models. Ensure your base model is a standard AE.")
+
+            if args.path_ckpt is None:
+                raise ValueError("Phase 2 training requires a checkpoint from Phase 1 via --path_ckpt.")
+
+            # 1. 加载基础AE模型
+            base_model_type = 'ae' if 'unet' not in self.ae_model_type else 'unet'
+            logging.info(f"Loading Phase 1 base model of type '{base_model_type}' for Phase 2 training.")
+            self.model = NetAFDAE().to(self.local_rank) if base_model_type == 'ae' else NetAFDAE_UNet().to(self.local_rank)
+            self._load_checkpoint_v0(args.path_ckpt)
+
+            # 2. 冻结基础AE
+            self.model.eval()
+            for param in self.model.parameters():
+                param.requires_grad = False
+            logging.info("Froze base AE model parameters.")
+
+            # 3. 创建并初始化MemoryHead
+            # 假设 latent_dim 在 nets.py 中是固定的，例如 128
+            latent_dim = self.model.get_latent_dim()
+            self.memory_head = MemoryHead(latent_dim=latent_dim, mem_dim=512).to(self.local_rank)
+            self.optimizer = optim.Adam(self.memory_head.parameters(), lr=self.lr)
+            logging.info(f"Initialized MemoryHead with latent_dim={latent_dim} and mem_dim=512.")
+
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.num_epochs, eta_min=1e-7)
 
         if self.local_rank == 0:
-            logging.info(f"Initialized AE model of type: '{self.ae_model_type}'")
-            if self.use_mem_ae:
-                logging.info(f"Sparsity loss weight for MemAE: {self.sparsity_weight}")
-            if 'flow' in self.ae_model_type:
-                logging.info(f"Flow loss weight: {self.flow_loss_weight}")
+            logging.info(f"Initialized classifier for Training Phase: {self.training_phase}")
 
-        if args.path_ckpt is not None:
+        # 在阶段1加载检查点是可选的，但在阶段2是强制的（已在上面处理）
+        if self.training_phase == 1 and args.path_ckpt is not None:
             self._load_checkpoint_v0(args.path_ckpt)
 
-        if ddp:
-            self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
+        self.ddp = ddp
+        if self.ddp:
+            if self.training_phase == 1:
+                self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
+            else:  # Phase 2
+                # Only wrap the trainable part (memory_head) in DDP
+                # The base model is frozen and does not need to be wrapped
+                self.memory_head = DDP(self.memory_head, device_ids=[self.local_rank], output_device=self.local_rank)
 
         # self.criterion = nn.MSELoss().to(self.local_rank)  # Reconstruction loss
         self.criterion = nn.L1Loss().to(self.local_rank)
@@ -450,7 +502,7 @@ class ClassifierCNNAE(ClassifierBase):
                 name = k[7:]
                 new_state_dict[name] = v
             state_dict = new_state_dict
-        # strict=False allows loading only encoder part if a classifier model is provided
+        # strict=False allows loading only encode part if a classifier model is provided
         self.model.load_state_dict(state_dict, strict=False)
         logging.info(f'Loaded checkpoint from {checkpoint_path}')
 
@@ -467,11 +519,162 @@ class ClassifierCNNAE(ClassifierBase):
         # 在所有记忆单元维度上求和，然后在批次维度上求平均
         return torch.mean(torch.sum(entropy, dim=1))
 
-    def train(self, data, loss_ckp=True):
+    def train(self, data):
+        if self.training_phase == 1:
+            self._train_phase1(data)
+        elif self.training_phase == 2:
+            self._train_phase2(data)
+        else:
+            raise ValueError(f"Invalid training phase: {self.training_phase}")
+
+    def _train_phase2(self, data):
+        """
+        第二阶段训练：冻结AE，仅训练MemoryHead，使用难例挖掘。
+        """
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
 
-        # dataset = HDF5Dataset(data['train_path'], self.features_generator.transform_sample_ae)
+        # --- 1. Hard Example Mining (on rank 0 only to avoid file contention and redundant work) ---
+        hard_examples_tensor = None
+        if self.rank == 0:
+            logging.info(f"Starting Phase 2: Hard Example Mining with threshold {self.hard_example_threshold}...")
+
+            # Use the full, non-random dataset to calculate errors for all normal samples
+            full_dataset = HDF5SequentialSliceDataset(
+                data['train_path'],
+                self.features_generator.transform_sample_ae,
+                seq_len=self.features_generator.seq_len,
+                step=self.features_generator.seq_len # no overlap
+            )
+            full_loader = DataLoader(dataset=full_dataset, batch_size=2048, shuffle=False)
+
+            all_normal_inputs, all_recon_errors = [], []
+            self.model.eval() # Ensure AE is in eval mode
+            with torch.no_grad():
+                for inputs, labels in full_loader:
+                    normal_indices = (labels.view(-1) == 0).cpu()
+                    if not torch.any(normal_indices): continue
+
+                    inputs_normal = inputs[normal_indices].to(self.local_rank)
+                    recons, _, _ = self.model(inputs_normal)
+                    errors = torch.mean((inputs_normal - recons)**2, dim=(1,2)).cpu()
+
+                    all_normal_inputs.append(inputs_normal.cpu())
+                    all_recon_errors.append(errors)
+
+            if not all_recon_errors:
+                logging.error("No normal samples found for hard example mining.")
+                # Create a sentinel empty tensor
+                hard_examples_tensor = torch.empty(0)
+            else:
+                all_normal_inputs = torch.cat(all_normal_inputs, dim=0)
+                all_recon_errors_np = torch.cat(all_recon_errors, dim=0).numpy()
+
+                error_threshold = np.percentile(all_recon_errors_np, self.hard_example_threshold * 100)
+                hard_indices = np.where(all_recon_errors_np >= error_threshold)[0]
+                hard_examples_tensor = all_normal_inputs[hard_indices]
+
+                logging.info(f"Found {len(all_recon_errors_np)} normal samples. Recon error stats: "
+                             f"min={np.min(all_recon_errors_np):.6f}, max={np.max(all_recon_errors_np):.6f}, "
+                             f"mean={np.mean(all_recon_errors_np):.6f}.")
+                logging.info(f"Error threshold at {self.hard_example_threshold*100}th percentile is {error_threshold:.6f}. "
+                             f"Found {len(hard_examples_tensor)} hard examples for training.")
+
+        if self.ddp:
+            # Broadcast the list containing the tensor from rank 0 to all other processes
+            obj_list = [hard_examples_tensor] if self.rank == 0 else [None]
+            dist.broadcast_object_list(obj_list, src=0)
+            hard_examples_tensor = obj_list[0]
+
+        if hard_examples_tensor is None or len(hard_examples_tensor) == 0:
+            if self.rank == 0:
+                logging.warning("No hard examples found above the threshold. Phase 2 training cannot proceed.")
+            return
+
+        # --- 2. Train MemoryHead ---
+        hard_dataset = TensorDataset(hard_examples_tensor)
+        is_distributed = self.ddp
+        train_sampler = torch.utils.data.distributed.DistributedSampler(hard_dataset) if is_distributed else None
+        loader = DataLoader(dataset=hard_dataset, batch_size=1024, shuffle=not is_distributed, sampler=train_sampler)
+
+        best_loss = float('inf')
+        self.memory_head.train()
+
+        for epoch in range(self.num_epochs // 4): # Phase 2 usually requires fewer epochs
+            epoch_start_time = time.time()
+            if is_distributed:
+                train_sampler.set_epoch(epoch)
+
+            epoch_entropy_loss = 0.0
+            num_batches = 0
+            for (inputs,) in loader: # TensorDataset returns a tuple
+                inputs = inputs.to(self.local_rank)
+
+                with torch.no_grad():
+                    latents = self.model.encode(inputs)
+
+                attention_weights = self.memory_head(latents)
+                entropy_loss = self._entropy_loss(attention_weights)
+
+                self.optimizer.zero_grad()
+                entropy_loss.backward()
+                self.optimizer.step()
+
+                epoch_entropy_loss += entropy_loss.item()
+                num_batches += 1
+
+            self.scheduler.step()
+
+            avg_epoch_loss = epoch_entropy_loss / num_batches if num_batches > 0 else 0
+            epoch_duration = time.time() - epoch_start_time
+
+            if self.rank == 0:
+                current_lr = self.optimizer.param_groups[0]['lr']
+                logging.info(
+                    f'Phase 2 - Epoch [{epoch + 1}/{self.num_epochs // 4}], '
+                    f'LR: {current_lr:.2e}, '
+                    f'Time: {epoch_duration:.2f}s, '
+                    f'Avg Entropy Loss: {avg_epoch_loss:.8f}'
+                )
+
+                if avg_epoch_loss < best_loss:
+                    best_loss = avg_epoch_loss
+                    # In phase 2, we save both the memory_head and the base model
+                    model_to_save = self.model.module if isinstance(self.model, DDP) else self.model
+                    head_to_save = self.memory_head.module if is_distributed else self.memory_head
+
+                    base_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_base.pt')
+                    head_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_head.pt')
+
+                    torch.save(model_to_save.state_dict(), base_path)
+                    torch.save(head_to_save.state_dict(), head_path)
+
+                    logging.info(f'Saved new best Phase 2 models with loss: {best_loss:.4f}')
+                logging.info(
+                    f'Phase 2 - Epoch [{epoch + 1}/{self.num_epochs // 4}], '
+                    f'LR: {current_lr:.2e}, '
+                    f'Time: {epoch_duration:.2f}s, '
+                    f'Avg Entropy Loss: {avg_epoch_loss:.8f}'
+                )
+
+                if avg_epoch_loss < best_loss:
+                    best_loss = avg_epoch_loss
+                    # 在阶段2，我们保存memory_head和基础模型
+                    model_to_save = self.model.module if isinstance(self.model, DDP) else self.model
+                    head_to_save = self.memory_head.module if is_distributed else self.memory_head
+
+                    base_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_base.pt')
+                    head_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_head.pt')
+
+                    torch.save(model_to_save.state_dict(), base_path)
+                    torch.save(head_to_save.state_dict(), head_path)
+
+                    logging.info(f'Saved new best Phase 2 models with loss: {best_loss:.4f}')
+
+    def _train_phase1(self, data, loss_ckp=True):
+        if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
+            os.makedirs(self.save_dir)
+
         dataset = HDF5SPDataset(
             data['train_path'],
             self.features_generator.transform_sample_ae,
@@ -544,43 +747,17 @@ class ClassifierCNNAE(ClassifierBase):
             avg_sparsity_loss = epoch_sparsity_loss / num_batches if num_batches > 0 else 0
             avg_flow_loss = epoch_flow_loss / num_batches if num_batches > 0 else 0
 
-            val_accuracy = self.evaluate(data['test_path']) if not loss_ckp else 1 - avg_epoch_loss
+            val_f1_score = self.evaluate(data['test_path']) if not loss_ckp else 1 - avg_epoch_loss
             epoch_duration = time.time() - epoch_start_time
 
             if self.rank == 0:
                 current_lr = self.optimizer.param_groups[0]['lr']
-                log_msg = (
-                    f'Epoch [{epoch + 1}/{self.num_epochs}], '
-                    f'LR: {current_lr:.2e}, '
-                    f'Time: {epoch_duration:.2f}s, '
-                    f'Validation Acc: {val_accuracy:.4f}'
-                )
-                if self.ae_model_type == 'mem-flow-ae':
-                    # Correctly calculate weighted losses for logging
-                    weighted_recon_loss = avg_recon_loss  # Assuming weight is 1.0
-                    weighted_sparsity_loss = avg_sparsity_loss * self.sparsity_weight
-                    weighted_flow_loss = avg_flow_loss * self.flow_loss_weight
-                    # For verification, their sum should be close to avg_epoch_loss
-                    calculated_total_loss = weighted_recon_loss + weighted_sparsity_loss + weighted_flow_loss
-
-                    log_msg += (
-                        f' | Total Loss: {avg_epoch_loss:.8f} (Calc: {calculated_total_loss:.8f})\n'
-                        f'        Components (Raw)      -> Recon: {avg_recon_loss:.8f}, Sparsity: {avg_sparsity_loss:.8f}, Flow: {avg_flow_loss:.8f}\n'
-                        f'        Components (Weighted) -> Recon: {weighted_recon_loss:.8f}, Sparsity: {weighted_sparsity_loss:.8f}, Flow: {weighted_flow_loss:.8f}'
-                    )
-                elif self.use_mem_ae:
-                    log_msg += (
-                        f' | Total Loss: {avg_epoch_loss:.8f} '
-                        f'(Recon: {avg_recon_loss:.8f} + Sparsity: {avg_sparsity_loss:.8f})'
-                    )
-                else:
-                    log_msg += (
-                        f' | Train Loss: {avg_epoch_loss:.8f}'
-                    )
+                log_msg = (f'Phase 1 - Epoch [{epoch + 1}/{self.num_epochs}], LR: {current_lr:.2e}, '
+                           f'Time: {epoch_duration:.2f}s, Val F1: {val_f1_score:.4f}, Train Loss: {avg_epoch_loss:.8f}')
                 logging.info(log_msg)
 
-                if val_accuracy > best_accuracy:
-                    best_accuracy = val_accuracy
+                if val_f1_score > best_accuracy:
+                    best_accuracy = val_f1_score
                     model_to_save = self.model.module if isinstance(self.model, DDP) else self.model
                     _path_save = os.path.join(self.save_dir, f'ae_best_e{epoch}_acc{best_accuracy:.4f}.pt')
                     torch.save(model_to_save.state_dict(), _path_save)
@@ -597,10 +774,15 @@ class ClassifierCNNAE(ClassifierBase):
 
         Returns:
             tuple[np.ndarray, np.ndarray]: A tuple containing:
-                - A 1D numpy array with the reconstruction score (MSE) for each sample.
+                - A 1D numpy array with the anomaly score for each sample.
+                  In Phase 1, this is reconstruction error (MSE).
+                  In Phase 2, this is entropy.
                 - A 2D numpy array with the latent vector for each sample.
         """
         # 确保模型处于评估模式
+        if self.training_phase == 2:
+            self.memory_head.eval()
+
         model_to_infer = self.model.module if isinstance(self.model, DDP) else self.model
         model_to_infer.eval()
 
@@ -612,24 +794,34 @@ class ClassifierCNNAE(ClassifierBase):
         )
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
-        all_errors = []
+        all_scores = []
         all_latents = []
         with torch.no_grad():
             for batch_x in loader:
                 batch_x = batch_x.to(self.local_rank)
-                reconstructions, latents, *_ = model_to_infer(batch_x)
 
-                # Calculate mean squared error for each sample in the batch.
-                # Shape of batch_x & reconstructions: [batch, 1, seq_len]
-                # We average over dims 1 and 2 to get a single scalar error score per sample.
-                errors = torch.mean((batch_x - reconstructions) ** 2, dim=(1, 2))
-                all_errors.append(errors.cpu().numpy())
+                if self.training_phase == 1:
+                    reconstructions, latents, *_ = model_to_infer(batch_x)
+                    # Anomaly score is reconstruction error
+                    scores = torch.mean((batch_x - reconstructions) ** 2, dim=(1, 2))
+                else: # Phase 2
+                    latents = model_to_infer.encode(batch_x)
+                    attention_weights = self.memory_head(latents)
+                    # Anomaly score is entropy
+                    epsilon = 1e-12
+                    entropy = -attention_weights * torch.log(attention_weights + epsilon)
+                    scores = torch.sum(entropy, dim=1)
+
+                all_scores.append(scores.cpu().numpy())
                 all_latents.append(latents.cpu().numpy())
 
-        # 推理结束后，将模型恢复到训练模式
+        # 推理结束后，恢复模式
         model_to_infer.train()
+        if self.training_phase == 2:
+            self.memory_head.train()
 
-        return np.concatenate(all_errors), np.concatenate(all_latents)
+
+        return np.concatenate(all_scores), np.concatenate(all_latents)
 
     def evaluate(self, test_path, batch_size=1024, threshold=None, plot_positive_index=None, plot_negative_index=None):
         """
@@ -654,6 +846,9 @@ class ClassifierCNNAE(ClassifierBase):
         )
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
+        if self.training_phase == 2 and hasattr(self, 'memory_head'):
+            self.memory_head.eval()
+
         model_to_eval = self.model.module if isinstance(self.model, DDP) else self.model
         model_to_eval.eval()
 
@@ -671,16 +866,24 @@ class ClassifierCNNAE(ClassifierBase):
             logging.error("Plot index must be a positive integer (>= 1).")
             plot_target_label = None  # Invalidate plotting
 
-        all_errors, all_labels = [], []
+        all_scores, all_labels = [], []
         plotted = False
         sample_type_counter = 0  # 计数找到的目标类型样本数量
 
         with torch.no_grad():
             for inputs, labels in loader:
                 inputs = inputs.to(self.local_rank)
-                reconstructions, *_ = model_to_eval(inputs)
 
-                errors = torch.mean((inputs - reconstructions) ** 2, dim=(1, 2)).cpu().numpy()
+                if self.training_phase == 1:
+                    reconstructions, *_ = model_to_eval(inputs)
+                    scores = torch.mean((inputs - reconstructions) ** 2, dim=(1, 2)).cpu().numpy()
+                else: # Phase 2
+                    latents = model_to_eval.encode(inputs)
+                    attention_weights = self.memory_head(latents)
+                    epsilon = 1e-12
+                    entropy = -attention_weights * torch.log(attention_weights + epsilon)
+                    scores = torch.sum(entropy, dim=1).cpu().numpy()
+                    reconstructions, *_ = model_to_eval(inputs) # For plotting only
 
                 # --- 新增：查找并绘制指定次序的样本 ---
                 _save_dir = "/home/manu/tmp"
@@ -699,15 +902,16 @@ class ClassifierCNNAE(ClassifierBase):
 
                             original_signal = inputs[idx_in_batch].cpu().numpy().flatten()
                             reconstructed_signal = reconstructions[idx_in_batch].cpu().numpy().flatten()
-                            error_for_sample = errors[idx_in_batch]
+                            score_for_sample = scores[idx_in_batch]
                             pointwise_squared_error = (original_signal - reconstructed_signal) ** 2
                             max_pointwise_error = np.mean(pointwise_squared_error)
 
                             fig, axs = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
                             title = (
                                 f'Reconstruction of {plot_target_ordinal + 1}-th {"Positive" if plot_target_label == 1 else "Negative"} Sample\n'
-                                f'MSE: {error_for_sample:.6f} | Mean Point-wise Sq. Error: {max_pointwise_error:.6f}'
-                            )
+                                f'MSE: {score_for_sample:.6f} | Mean Point-wise Sq. Error: {max_pointwise_error:.6f}'
+                            ) if self.training_phase == 1 else (
+                                f'Reconstruction with Entropy Score: {score_for_sample:.6f}')
                             fig.suptitle(title, fontsize=16)
 
                             axs[0].plot(original_signal, color='blue', label='Original')
@@ -742,7 +946,7 @@ class ClassifierCNNAE(ClassifierBase):
                     sample_type_counter += num_targets_in_batch
 
                 # 收集所有样本的误差和标签用于最终评估
-                all_errors.extend(errors)
+                all_scores.extend(scores)
                 all_labels.extend(labels.cpu().numpy().flatten())
 
         # --- 新增：检查是否成功绘图 ---
@@ -751,7 +955,7 @@ class ClassifierCNNAE(ClassifierBase):
                 f"Could not find the {plot_target_ordinal + 1}-th {'positive' if plot_target_label == 1 else 'negative'} sample. "
                 f"The dataset may contain fewer than this number of samples of that type.")
 
-        all_errors = np.array(all_errors)
+        all_scores = np.array(all_scores)
         all_labels = np.array(all_labels)
 
         # 处理测试集只包含一个类别的边缘情况
@@ -765,7 +969,7 @@ class ClassifierCNNAE(ClassifierBase):
 
         if threshold is None:
             # 自动找到区分正常和异常样本的最佳阈值
-            fpr, tpr, thresholds = roc_curve(all_labels, all_errors)
+            fpr, tpr, thresholds = roc_curve(all_labels, all_scores)
             j_scores = tpr - fpr
             best_threshold_idx = np.argmax(j_scores)
             best_threshold = thresholds[best_threshold_idx]
@@ -774,7 +978,7 @@ class ClassifierCNNAE(ClassifierBase):
             logging.info(f"Using manually specified threshold: {best_threshold}")
 
         # 基于最佳阈值进行预测
-        predictions = (all_errors >= best_threshold).astype(int)
+        predictions = (all_scores >= best_threshold).astype(int)
         # 改为使用 F1-Score 作为主要的评估指标
         f1 = f1_score(all_labels, predictions)
 
@@ -802,6 +1006,8 @@ class ClassifierCNNAE(ClassifierBase):
 
         # 在退出前确保模型切换回训练模式
         model_to_eval.train()
+        if self.training_phase == 2 and hasattr(self, 'memory_head'):
+            self.memory_head.train()
 
         return f1
 
