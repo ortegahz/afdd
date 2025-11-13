@@ -5,26 +5,27 @@ import os
 import time
 
 import numpy as np
-import torch.distributed as dist
 import onnxruntime as ort
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.optim as optim
 import xgboost as xgb
 from sklearn.metrics import f1_score, roc_curve
 from torch.ao.quantization import get_default_qat_qconfig, QConfigMapping
 from torch.ao.quantization.quantize_fx import fuse_fx, prepare_qat_fx, convert_fx
+from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing import assert_close  # PyTorch ≥1.12 推荐
-from torch.utils.data import DataLoader, TensorDataset
 from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 
 from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
                                       HDF5Dataset, HDF5SequentialSliceDataset, HDF5SPDataset)
-from cores.loss import HardExampleMiningFocalLoss, F
-from torch.nn import functional as F
-from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem, NetAFDAE_Mem_Flow
+from cores.loss import HardExampleMiningFocalLoss
+from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet
 from utils.macros import MIN_VAL_TH
+from utils.utils import make_dirs
 
 
 class ClassifierBase:
@@ -421,6 +422,8 @@ class ClassifierCNNAE(ClassifierBase):
         self.training_phase = getattr(args, 'training_phase', 1)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
 
+        make_dirs(args.save_dir, reset=True)
+
         # --- Phase-dependent model initialization ---
         model = None
         if self.ae_model_type == 'ae':
@@ -452,7 +455,8 @@ class ClassifierCNNAE(ClassifierBase):
             # 1. 加载基础AE模型
             base_model_type = 'ae' if 'unet' not in self.ae_model_type else 'unet'
             logging.info(f"Loading Phase 1 base model of type '{base_model_type}' for Phase 2 training.")
-            self.model = NetAFDAE().to(self.local_rank) if base_model_type == 'ae' else NetAFDAE_UNet().to(self.local_rank)
+            self.model = NetAFDAE().to(self.local_rank) if base_model_type == 'ae' else NetAFDAE_UNet().to(
+                self.local_rank)
             self._load_checkpoint_v0(args.path_ckpt)
 
             # 2. 冻结基础AE
@@ -468,7 +472,7 @@ class ClassifierCNNAE(ClassifierBase):
             self.optimizer = optim.Adam(self.memory_head.parameters(), lr=self.lr)
             logging.info(f"Initialized MemoryHead with latent_dim={latent_dim} and mem_dim=512.")
 
-        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.num_epochs, eta_min=1e-7)
+        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.num_epochs, eta_min=0.)
 
         if self.local_rank == 0:
             logging.info(f"Initialized classifier for Training Phase: {self.training_phase}")
@@ -544,12 +548,12 @@ class ClassifierCNNAE(ClassifierBase):
                 data['train_path'],
                 self.features_generator.transform_sample_ae,
                 seq_len=self.features_generator.seq_len,
-                step=self.features_generator.seq_len # no overlap
+                step=self.features_generator.seq_len  # no overlap
             )
             full_loader = DataLoader(dataset=full_dataset, batch_size=2048, shuffle=False)
 
             all_normal_inputs, all_recon_errors = [], []
-            self.model.eval() # Ensure AE is in eval mode
+            self.model.eval()  # Ensure AE is in eval mode
             with torch.no_grad():
                 for inputs, labels in full_loader:
                     normal_indices = (labels.view(-1) == 0).cpu()
@@ -557,7 +561,7 @@ class ClassifierCNNAE(ClassifierBase):
 
                     inputs_normal = inputs[normal_indices].to(self.local_rank)
                     recons, _, _ = self.model(inputs_normal)
-                    errors = torch.mean((inputs_normal - recons)**2, dim=(1,2)).cpu()
+                    errors = torch.mean((inputs_normal - recons) ** 2, dim=(1, 2)).cpu()
 
                     all_normal_inputs.append(inputs_normal.cpu())
                     all_recon_errors.append(errors)
@@ -577,8 +581,9 @@ class ClassifierCNNAE(ClassifierBase):
                 logging.info(f"Found {len(all_recon_errors_np)} normal samples. Recon error stats: "
                              f"min={np.min(all_recon_errors_np):.6f}, max={np.max(all_recon_errors_np):.6f}, "
                              f"mean={np.mean(all_recon_errors_np):.6f}.")
-                logging.info(f"Error threshold at {self.hard_example_threshold*100}th percentile is {error_threshold:.6f}. "
-                             f"Found {len(hard_examples_tensor)} hard examples for training.")
+                logging.info(
+                    f"Error threshold at {self.hard_example_threshold * 100}th percentile is {error_threshold:.6f}. "
+                    f"Found {len(hard_examples_tensor)} hard examples for training.")
 
         if self.ddp:
             # Broadcast the list containing the tensor from rank 0 to all other processes
@@ -600,14 +605,14 @@ class ClassifierCNNAE(ClassifierBase):
         best_loss = float('inf')
         self.memory_head.train()
 
-        for epoch in range(self.num_epochs): # Phase 2 usually requires fewer epochs
+        for epoch in range(self.num_epochs):  # Phase 2 usually requires fewer epochs
             epoch_start_time = time.time()
             if is_distributed:
                 train_sampler.set_epoch(epoch)
 
             epoch_entropy_loss = 0.0
             num_batches = 0
-            for (inputs,) in loader: # TensorDataset returns a tuple
+            for (inputs,) in loader:  # TensorDataset returns a tuple
                 inputs = inputs.to(self.local_rank)
 
                 with torch.no_grad():
@@ -804,7 +809,7 @@ class ClassifierCNNAE(ClassifierBase):
                     reconstructions, latents, *_ = model_to_infer(batch_x)
                     # Anomaly score is reconstruction error
                     scores = torch.mean((batch_x - reconstructions) ** 2, dim=(1, 2))
-                else: # Phase 2
+                else:  # Phase 2
                     latents = model_to_infer.encode(batch_x)
                     attention_weights = self.memory_head(latents)
                     # Anomaly score is entropy
@@ -819,7 +824,6 @@ class ClassifierCNNAE(ClassifierBase):
         model_to_infer.train()
         if self.training_phase == 2:
             self.memory_head.train()
-
 
         return np.concatenate(all_scores), np.concatenate(all_latents)
 
@@ -877,13 +881,13 @@ class ClassifierCNNAE(ClassifierBase):
                 if self.training_phase == 1:
                     reconstructions, *_ = model_to_eval(inputs)
                     scores = torch.mean((inputs - reconstructions) ** 2, dim=(1, 2)).cpu().numpy()
-                else: # Phase 2
+                else:  # Phase 2
                     latents = model_to_eval.encode(inputs)
                     attention_weights = self.memory_head(latents)
                     epsilon = 1e-12
                     entropy = -attention_weights * torch.log(attention_weights + epsilon)
                     scores = torch.sum(entropy, dim=1).cpu().numpy()
-                    reconstructions, *_ = model_to_eval(inputs) # For plotting only
+                    reconstructions, *_ = model_to_eval(inputs)  # For plotting only
 
                 # --- 新增：查找并绘制指定次序的样本 ---
                 _save_dir = "/home/manu/tmp"
