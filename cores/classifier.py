@@ -385,10 +385,29 @@ class MemoryHead(nn.Module):
     """
     一个独立的记忆头，作用于已经提取的latent space上。
     设计用于在冻结的encoder之上进行训练。
+    - V2: 增加了一个MLP来转换潜向量，以增加可学习参数和模型的表达能力。
     """
 
-    def __init__(self, latent_dim, mem_dim=512):
+    def __init__(self, latent_dim, mem_dim=512, hidden_dim=256, num_layers=8):
         super().__init__()
+        # --- MLP for latent space transformation ---
+        # 增加一个多层感知机 (MLP) 来转换输入特征 z, 增加模型的复杂度。
+        # 这为 Phase 2 训练提供了更多可学习的参数。
+        layers = []
+        input_d = latent_dim
+        # 创建一个包含 `num_layers` 个隐藏层的MLP
+        for _ in range(num_layers):
+            layers.append(nn.Linear(input_d, hidden_dim))
+            # 使用 BatchNorm1d 稳定训练
+            layers.append(nn.BatchNorm1d(hidden_dim))
+            layers.append(nn.ReLU(inplace=True))
+            input_d = hidden_dim
+
+        # 最后一层将特征投影回原始的 latent_dim，以便与 memory bank 进行交互
+        layers.append(nn.Linear(input_d, latent_dim))
+        self.mlp = nn.Sequential(*layers)
+
+        # --- Memory Matrix (as before) ---
         self.memory = nn.Parameter(torch.randn(mem_dim, latent_dim))
         nn.init.kaiming_uniform_(self.memory)  # 使用较好的初始化
 
@@ -396,9 +415,13 @@ class MemoryHead(nn.Module):
         """
         z: latent vector, shape [batch_size, latent_dim]
         """
+        # 1. 将潜向量 z 通过 MLP 进行转换
+        z_transformed = self.mlp(z)
+
+        # 2. 使用转换后的向量 z_transformed 来查询记忆库
         # 使用归一化的点积（余弦相似度）计算注意力
         # 这比简单的矩阵乘法更稳定
-        attention = F.linear(F.normalize(z, dim=1), F.normalize(self.memory, dim=1))
+        attention = F.linear(F.normalize(z_transformed, dim=1), F.normalize(self.memory, dim=1))
         attention_weights = F.softmax(attention, dim=1)
 
         return attention_weights
@@ -417,7 +440,7 @@ class ClassifierCNNAE(ClassifierBase):
         super().__init__()
         self.local_rank = args.rank
         self.num_epochs = 8192 * 64
-        self.lr = 1e-4
+        self.lr = 1e-5
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 1)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
@@ -468,9 +491,10 @@ class ClassifierCNNAE(ClassifierBase):
             # 3. 创建并初始化MemoryHead
             # 假设 latent_dim 在 nets.py 中是固定的，例如 128
             latent_dim = self.model.get_latent_dim()
+            # 使用了带有MLP的增强版MemoryHead，以增加Phase 2的可训练参数
             self.memory_head = MemoryHead(latent_dim=latent_dim, mem_dim=512).to(self.local_rank)
             self.optimizer = optim.Adam(self.memory_head.parameters(), lr=self.lr)
-            logging.info(f"Initialized MemoryHead with latent_dim={latent_dim} and mem_dim=512.")
+            logging.info(f"Initialized Enhanced MemoryHead with MLP. Latent_dim={latent_dim}, mem_dim=512.")
 
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.num_epochs, eta_min=0.)
 
@@ -548,18 +572,18 @@ class ClassifierCNNAE(ClassifierBase):
                 data['train_path'],
                 self.features_generator.transform_sample_ae,
                 seq_len=self.features_generator.seq_len,
-                step=self.features_generator.seq_len  # no overlap
+                step=self.features_generator.seq_len,  # no overlap
+                only_normal=True
             )
             full_loader = DataLoader(dataset=full_dataset, batch_size=2048, shuffle=False)
 
             all_normal_inputs, all_recon_errors = [], []
             self.model.eval()  # Ensure AE is in eval mode
             with torch.no_grad():
-                for inputs, labels in full_loader:
-                    normal_indices = (labels.view(-1) == 0).cpu()
-                    if not torch.any(normal_indices): continue
-
-                    inputs_normal = inputs[normal_indices].to(self.local_rank)
+                # Since the dataset is now pre-filtered to contain only normal samples,
+                # we can simplify the loop and directly use the inputs.
+                for inputs, _ in full_loader:
+                    inputs_normal = inputs.to(self.local_rank)
                     recons, _, _ = self.model(inputs_normal)
                     errors = torch.mean((inputs_normal - recons) ** 2, dim=(1, 2)).cpu()
 
@@ -648,8 +672,10 @@ class ClassifierCNNAE(ClassifierBase):
                     model_to_save = self.model.module if isinstance(self.model, DDP) else self.model
                     head_to_save = self.memory_head.module if is_distributed else self.memory_head
 
-                    base_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_base.pt')
-                    head_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_head.pt')
+                    # base_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_base.pt')
+                    # head_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_head.pt')
+                    base_path = os.path.join(self.save_dir, f'phase2_best_base.pt')
+                    head_path = os.path.join(self.save_dir, f'phase2_best_head.pt')
 
                     torch.save(model_to_save.state_dict(), base_path)
                     torch.save(head_to_save.state_dict(), head_path)

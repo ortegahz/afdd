@@ -371,7 +371,7 @@ class HDF5SequentialSliceDataset(torch.utils.data.Dataset):
     只保留那些信号变化幅度超过阈值的切片，以过滤掉无效或平坦的信号段。
     """
 
-    def __init__(self, hdf5_file_path, transform, seq_len, step, min_delta=MIN_VAL_TH * 2):
+    def __init__(self, hdf5_file_path, transform, seq_len, step, min_delta=MIN_VAL_TH * 2, only_normal=False):
         self.hdf5_file_path = hdf5_file_path
         self.transform = transform
         self.seq_len = seq_len
@@ -386,6 +386,12 @@ class HDF5SequentialSliceDataset(torch.utils.data.Dataset):
                 signal_len = len(f[key]['signal'])
                 # 从0开始，以step为步长，生成所有可能的起始点
                 for start_idx in range(0, signal_len - self.seq_len + 1, self.step):
+                    # 如果只需要正常样本，则预先检查标签
+                    if only_normal:
+                        y_sample_slice = f[key]['label_seq'][start_idx:start_idx + self.seq_len]
+                        if np.any(y_sample_slice > 0):
+                            continue  # 跳过异常样本
+
                     # 读取切片数据以进行检查
                     x_sample = f[key]['signal'][start_idx: start_idx + self.seq_len]
 
