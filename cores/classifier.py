@@ -415,8 +415,8 @@ class ClassifierCNNAE(ClassifierBase):
         """
         super().__init__()
         self.local_rank = args.rank
-        self.num_epochs = 8192
-        self.lr = 1e-3
+        self.num_epochs = 8192 * 64
+        self.lr = 1e-4
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 1)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
@@ -600,7 +600,7 @@ class ClassifierCNNAE(ClassifierBase):
         best_loss = float('inf')
         self.memory_head.train()
 
-        for epoch in range(self.num_epochs // 4): # Phase 2 usually requires fewer epochs
+        for epoch in range(self.num_epochs): # Phase 2 usually requires fewer epochs
             epoch_start_time = time.time()
             if is_distributed:
                 train_sampler.set_epoch(epoch)
@@ -631,7 +631,7 @@ class ClassifierCNNAE(ClassifierBase):
             if self.rank == 0:
                 current_lr = self.optimizer.param_groups[0]['lr']
                 logging.info(
-                    f'Phase 2 - Epoch [{epoch + 1}/{self.num_epochs // 4}], '
+                    f'Phase 2 - Epoch [{epoch + 1}/{self.num_epochs}], '
                     f'LR: {current_lr:.2e}, '
                     f'Time: {epoch_duration:.2f}s, '
                     f'Avg Entropy Loss: {avg_epoch_loss:.8f}'
