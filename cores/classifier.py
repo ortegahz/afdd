@@ -457,44 +457,60 @@ class ClassifierCNNAE(ClassifierBase):
             self.use_mem_ae = False
         elif self.ae_model_type in ['mem-ae', 'unet-mem', 'mem-flow-ae']:
             logging.warning("Phase 1 training is for reconstruction. Forcing a non-memory AE model.")
+            # This is a memory model, but memory head is only used in phase 2.
+            self.use_mem_ae = self.training_phase == 2
             self.ae_model_type = 'ae' if 'unet' not in self.ae_model_type else 'unet'
-            model = NetAFDAE().to(self.local_rank) if self.ae_model_type == 'ae' else NetAFDAE_UNet().to(
-                self.local_rank)
-            self.use_mem_ae = False
+            if self.training_phase == 1:
+                model = NetAFDAE().to(self.local_rank) if self.ae_model_type == 'ae' else NetAFDAE_UNet().to(
+                    self.local_rank)
         else:
-            raise ValueError(f"Unsupported AE model type for Phase 1: {self.ae_model_type}")
+            raise ValueError(f"Unsupported AE model type: {self.ae_model_type}")
 
         if self.training_phase == 1:
             self.model = model
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
         else:
             # 在阶段2，我们加载基础AE，冻结它，并只训练MemoryHead
-            if not self.use_mem_ae:
-                logging.warning("Phase 2 is for memory models. Ensure your base model is a standard AE.")
-
             if args.path_ckpt is None:
                 raise ValueError("Phase 2 training requires a checkpoint from Phase 1 via --path_ckpt.")
 
-            # 1. 加载基础AE模型
+            # 1. 初始化模型 (base AE 和 memory head)
             base_model_type = 'ae' if 'unet' not in self.ae_model_type else 'unet'
-            logging.info(f"Loading Phase 1 base model of type '{base_model_type}' for Phase 2 training.")
             self.model = NetAFDAE().to(self.local_rank) if base_model_type == 'ae' else NetAFDAE_UNet().to(
                 self.local_rank)
-            self._load_checkpoint_v0(args.path_ckpt)
+            latent_dim = self.model.get_latent_dim()
+            self.memory_head = MemoryHead(latent_dim=latent_dim, mem_dim=512).to(self.local_rank)
 
-            # 2. 冻结基础AE
+            # 2. 智能判断和分配检查点路径
+            ckpt_path = args.path_ckpt
+            base_ckpt_path, head_ckpt_path = None, None
+
+            if "_base.pt" in ckpt_path:
+                base_ckpt_path = ckpt_path
+                head_ckpt_path = ckpt_path.replace("_base.pt", "_head.pt")
+            elif "_head.pt" in ckpt_path:
+                head_ckpt_path = ckpt_path
+                base_ckpt_path = ckpt_path.replace("_head.pt", "_base.pt")
+            else:  # 认为是第一阶段的检查点
+                base_ckpt_path = ckpt_path
+
+            # 3. 加载检查点
+            if not os.path.exists(base_ckpt_path):
+                raise FileNotFoundError(f"Base model checkpoint not found at a presumed path: {base_ckpt_path}")
+            self._load_checkpoint_v0(base_ckpt_path, model=self.model, strict=False)
+
+            if head_ckpt_path and os.path.exists(head_ckpt_path):
+                self._load_checkpoint_v0(head_ckpt_path, model=self.memory_head, strict=True)
+                logging.info(f"Resuming phase 2 with loaded memory head from: {head_ckpt_path}")
+            else:
+                logging.info("Starting phase 2 with a fresh memory head (or head checkpoint not found).")
+
+            # 4. 冻结基础AE并配置优化器
             self.model.eval()
             for param in self.model.parameters():
                 param.requires_grad = False
             logging.info("Froze base AE model parameters.")
-
-            # 3. 创建并初始化MemoryHead
-            # 假设 latent_dim 在 nets.py 中是固定的，例如 128
-            latent_dim = self.model.get_latent_dim()
-            # 使用了带有MLP的增强版MemoryHead，以增加Phase 2的可训练参数
-            self.memory_head = MemoryHead(latent_dim=latent_dim, mem_dim=512).to(self.local_rank)
             self.optimizer = optim.Adam(self.memory_head.parameters(), lr=self.lr)
-            logging.info(f"Initialized Enhanced MemoryHead with MLP. Latent_dim={latent_dim}, mem_dim=512.")
 
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.num_epochs, eta_min=0.)
 
@@ -521,18 +537,19 @@ class ClassifierCNNAE(ClassifierBase):
         self.rank = args.rank
         self.save_dir = args.save_dir
 
-    def _load_checkpoint_v0(self, checkpoint_path):
+    def _load_checkpoint_v0(self, checkpoint_path, model=None, strict=True):
+        target_model = self.model if model is None else model
         state_dict = torch.load(checkpoint_path, map_location=f'cuda:{self.local_rank}')
         # Handle DDP-saved models
-        if 'module.' in list(state_dict.keys())[0]:
+        if any(k.startswith('module.') for k in state_dict.keys()):
             new_state_dict = {}
             for k, v in state_dict.items():
-                name = k[7:]
+                name = k.replace('module.', '')
                 new_state_dict[name] = v
             state_dict = new_state_dict
         # strict=False allows loading only encode part if a classifier model is provided
-        self.model.load_state_dict(state_dict, strict=False)
-        logging.info(f'Loaded checkpoint from {checkpoint_path}')
+        target_model.load_state_dict(state_dict, strict=strict)
+        logging.info(f'Loaded checkpoint into {target_model.__class__.__name__} from {checkpoint_path} (strict={strict})')
 
     def _entropy_loss(self, attention_weights: torch.Tensor) -> torch.Tensor:
         """
@@ -676,26 +693,6 @@ class ClassifierCNNAE(ClassifierBase):
                     # head_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_head.pt')
                     base_path = os.path.join(self.save_dir, f'phase2_best_base.pt')
                     head_path = os.path.join(self.save_dir, f'phase2_best_head.pt')
-
-                    torch.save(model_to_save.state_dict(), base_path)
-                    torch.save(head_to_save.state_dict(), head_path)
-
-                    logging.info(f'Saved new best Phase 2 models with loss: {best_loss:.4f}')
-                logging.info(
-                    f'Phase 2 - Epoch [{epoch + 1}/{self.num_epochs // 4}], '
-                    f'LR: {current_lr:.2e}, '
-                    f'Time: {epoch_duration:.2f}s, '
-                    f'Avg Entropy Loss: {avg_epoch_loss:.8f}'
-                )
-
-                if avg_epoch_loss < best_loss:
-                    best_loss = avg_epoch_loss
-                    # 在阶段2，我们保存memory_head和基础模型
-                    model_to_save = self.model.module if isinstance(self.model, DDP) else self.model
-                    head_to_save = self.memory_head.module if is_distributed else self.memory_head
-
-                    base_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_base.pt')
-                    head_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_head.pt')
 
                     torch.save(model_to_save.state_dict(), base_path)
                     torch.save(head_to_save.state_dict(), head_path)
