@@ -121,7 +121,7 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v1/best_e348_b0.9867.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e472_b0.9878.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v9 - dv37/afdd_models_mp/best_e501_b0.9864.pt'):
-    def _build_model(self, path_model='/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best_e680_acc0.9818.pt'):
+    def _build_model(self, path_model='/home/manu/mnt/8gpu_3090/afdd_models_mp_v6/phase2_best_base.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         # self.classifier = ClassifierCNN(args=path_model, is_infer=True)
@@ -1174,20 +1174,17 @@ class ArcDetector:
         _seq_pick = _seq_pick_power
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
         _data = _seq_pick[np.newaxis, :]
-        _score, _latent = self.classifier.infer(_data, batch_size=1)
+        _score, _latent, _entropy_score = self.classifier.infer(_data, batch_size=1)
         _latent = _latent.flatten()
         _score = _score[0] * 1e1 * 32  # 32 for current signal
 
-        # _th_arc = (_peak_val - self.power_mean) * 0.01
-        # _cnt_arc = np.sum(np.abs(_seq_pick_power - self.power_mean) < _th_arc)
-        # _scale_arc = 128
-        # _cnt_arc = _cnt_arc if _cnt_arc * _scale_arc < self.indicator_max_val else self.indicator_max_val / _scale_arc
-        # self.db.db['rt'].seq_state_pred_balcony[peak_idx - self.af_win_size:peak_idx] = \
-        #     [_cnt_arc * _scale_arc] * self.af_win_size
-        # _score += _cnt_arc / 16
+        self.db.db['rt'].seq_state_pred_balcony[peak_idx - self.af_win_size:peak_idx] = \
+            [_entropy_score[0] * 512] * self.af_win_size  # Scale for visualization
 
         _is_arc_by_model = _score * self.indicator_max_val > _th_raw
         _is_arc = _is_arc_by_model
+
+        if _is_arc: print(f"_entropy_score[0] -- > {_entropy_score[0]}")
 
         # is_inference_mode = not feat_sample and not blacklist_sample
 

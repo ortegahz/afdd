@@ -442,7 +442,7 @@ class ClassifierCNNAE(ClassifierBase):
         self.num_epochs = 8192 * 64
         self.lr = 1e-5
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
-        self.training_phase = getattr(args, 'training_phase', 1)
+        self.training_phase = getattr(args, 'training_phase', 2)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
 
         make_dirs(args.save_dir, reset=True)
@@ -794,17 +794,17 @@ class ClassifierCNNAE(ClassifierBase):
 
     def infer(self, x, batch_size=16):
         """
-        Performs inference using the AutoEncoder model and returns the reconstruction error and latent vector for each sample.
+        Performs inference using the AutoEncoder model.
 
         Args:
             x: Input data, can be a numpy array, list, or any format supported by InferenceDataset.
             batch_size (int): The batch size for inference.
 
         Returns:
-            tuple[np.ndarray, np.ndarray]: A tuple containing:
-                - A 1D numpy array with the anomaly score for each sample.
-                  In Phase 1, this is reconstruction error (MSE).
-                  In Phase 2, this is entropy.
+            tuple[np.ndarray, np.ndarray, np.ndarray]: A tuple containing:
+                - A 1D numpy array with the reconstruction error (MSE) for each sample.
+                - A 1D numpy array with the attention entropy score for each sample.
+                  (Returns zeros if not in Phase 2).
                 - A 2D numpy array with the latent vector for each sample.
         """
         # 确保模型处于评估模式
@@ -822,25 +822,31 @@ class ClassifierCNNAE(ClassifierBase):
         )
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
-        all_scores = []
+        all_recon_errors = []
+        all_entropy_scores = []
         all_latents = []
         with torch.no_grad():
             for batch_x in loader:
                 batch_x = batch_x.to(self.local_rank)
 
-                if self.training_phase == 1:
-                    reconstructions, latents, *_ = model_to_infer(batch_x)
-                    # Anomaly score is reconstruction error
-                    scores = torch.mean((batch_x - reconstructions) ** 2, dim=(1, 2))
-                else:  # Phase 2
-                    latents = model_to_infer.encode(batch_x)
+                # 1. 统一获取重构结果和潜向量
+                reconstructions, latents, *_ = model_to_infer(batch_x)
+
+                # 2. 计算重构误差 (Reconstruction Error)，始终计算
+                recon_error = torch.mean((batch_x - reconstructions) ** 2, dim=(1, 2))
+
+                # 3. 计算注意力熵 (Entropy Score)，只在阶段2计算
+                if self.training_phase == 2:
                     attention_weights = self.memory_head(latents)
-                    # Anomaly score is entropy
                     epsilon = 1e-12
                     entropy = -attention_weights * torch.log(attention_weights + epsilon)
-                    scores = torch.sum(entropy, dim=1)
+                    entropy_score = torch.sum(entropy, dim=1)
+                else:
+                    # 阶段1没有 memory_head，熵分数为0
+                    entropy_score = torch.zeros_like(recon_error)
 
-                all_scores.append(scores.cpu().numpy())
+                all_recon_errors.append(recon_error.cpu().numpy())
+                all_entropy_scores.append(entropy_score.cpu().numpy())
                 all_latents.append(latents.cpu().numpy())
 
         # 推理结束后，恢复模式
@@ -848,7 +854,7 @@ class ClassifierCNNAE(ClassifierBase):
         if self.training_phase == 2:
             self.memory_head.train()
 
-        return np.concatenate(all_scores), np.concatenate(all_latents)
+        return np.concatenate(all_recon_errors), np.concatenate(all_latents), np.concatenate(all_entropy_scores)
 
     def evaluate(self, test_path, batch_size=1024, threshold=None, plot_positive_index=None, plot_negative_index=None):
         """
