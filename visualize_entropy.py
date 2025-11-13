@@ -1,3 +1,6 @@
+# FILE: visualize_attention_animation.py
+# (Originally visualize_entropy.py, modified to create animations)
+
 import argparse
 import logging
 import os
@@ -38,7 +41,7 @@ def setup_logging():
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="使用预训练的Phase-2 AutoEncoder模型计算注意力熵，并将其分布可视化。")
+        description="使用预训练的Phase-2 AutoEncoder模型生成注意力权重分布的动画。")
     parser.add_argument(
         '--model_path',
         type=str,
@@ -58,8 +61,8 @@ def parse_args():
     parser.add_argument(
         '--output_file',
         type=str,
-        default="/home/manu/tmp/afdd_ae_results/entropy_distribution.html",
-        help="用于保存注意力熵分布交互式图的输出HTML文件路径。")
+        default="/home/manu/tmp/afdd_ae_results/attention_animation.html",
+        help="用于保存注意力权重分布动画的输出HTML文件路径。")
     parser.add_argument(
         '--device',
         type=str,
@@ -73,8 +76,8 @@ def parse_args():
     parser.add_argument(
         '--max_samples',
         type=int,
-        default=20000,
-        help="用于可视化的最大样本数。设为-1表示使用所有样本。")
+        default=200,
+        help="用于动画的最大样本数。注意：大数值会产生非常大的HTML文件。")
     parser.add_argument(
         '--show_plot',
         action='store_true',
@@ -82,50 +85,73 @@ def parse_args():
     return parser.parse_args()
 
 
-def plot_entropy_distribution(scores, labels, output_path, title='Attention Entropy Distribution', show_plot=False):
+def plot_attention_animation(attentions, labels, output_path, title='Attention Weight Animation', show_plot=False):
     """
-    使用Plotly生成并保存一个可交互的注意力熵分布直方图。
+    使用Plotly生成并保存一个可交互的注意力权重分布动画。
     """
-    fig = go.Figure()
+    num_samples, mem_dim = attentions.shape
+    x_axis = np.arange(mem_dim)
 
-    # 分离正负样本的得分
-    pos_scores = scores[labels == 1]
-    neg_scores = scores[labels == 0]
+    # --- 1. 创建基础图形（显示第一个样本） ---
+    initial_label = labels[0]
+    initial_color = 'red' if initial_label == 1 else 'blue'
+    initial_label_text = 'Fault' if initial_label == 1 else 'Normal'
 
-    logging.info(
-        f"正例样本 (故障) 数量: {len(pos_scores)}, "
-        f"熵均值: {np.mean(pos_scores):.4f}, 标准差: {np.std(pos_scores):.4f}"
+    fig = go.Figure(
+        data=[go.Bar(x=x_axis, y=attentions[0], marker_color=initial_color, name='Attention Weight')],
+        layout=go.Layout(
+            title=f"{title}<br>Sample 1 ({initial_label_text})",
+            xaxis_title="Memory Slot Index",
+            yaxis_title="Attention Weight",
+            yaxis_range=[0, np.max(attentions) * 1.1]  # 固定Y轴范围以便于比较
+        ),
+        frames=[go.Frame(
+            data=[go.Bar(y=att.flatten(), marker_color='red' if lab == 1 else 'blue')],
+            name=str(i),
+            layout=go.Layout(title_text=f"{title}<br>Sample {i + 1} ({'Fault' if lab == 1 else 'Normal'})")
+        ) for i, (att, lab) in enumerate(zip(attentions, labels))]
     )
-    logging.info(
-        f"负例样本 (正常) 数量: {len(neg_scores)}, "
-        f"熵均值: {np.mean(neg_scores):.4f}, 标准差: {np.std(neg_scores):.4f}"
-    )
 
-    # 绘制负例（正常）样本的分布
-    fig.add_trace(go.Histogram(
-        x=neg_scores,
-        name='Normal (label=0)',
-        marker_color='blue',
-        opacity=0.7,
-        histnorm='probability density'  # 归一化以比较分布形状
-    ))
-
-    # 绘制正例（故障）样本的分布
-    fig.add_trace(go.Histogram(
-        x=pos_scores,
-        name='Fault (label=1)',
-        marker_color='red',
-        opacity=0.7,
-        histnorm='probability density'
-    ))
+    # --- 2. 配置动画控件（播放/暂停按钮和滑块） ---
+    def frame_args(duration):
+        return {
+            "frame": {"duration": duration},
+            "mode": "immediate",
+            "fromcurrent": True,
+            "transition": {"duration": duration, "easing": "linear"},
+        }
 
     fig.update_layout(
-        barmode='overlay',  # 叠加直方图
-        title=dict(text=title, x=0.5),
-        xaxis_title_text='Attention Entropy Score',
-        yaxis_title_text='Density',
-        legend_title_text='Sample Type',
-        margin=dict(l=0, r=0, b=0, t=40)
+        updatemenus=[{
+            "type": "buttons",
+            "buttons": [
+                {"label": "Play", "method": "animate", "args": [None, frame_args(50)]},
+                {"label": "Pause", "method": "animate", "args": [[None], frame_args(0)]},
+            ],
+            "direction": "left",
+            "pad": {"r": 10, "t": 70},
+            "x": 0.1,
+            "xanchor": "right",
+            "y": 0,
+            "yanchor": "top",
+        }],
+        sliders=[{
+            "active": 0,
+            "steps": [
+                {
+                    "label": f"Sample {i + 1}",
+                    "method": "animate",
+                    "args": [[str(i)], frame_args(0)],
+                }
+                for i in range(num_samples)
+            ],
+            "pad": {"t": 30, "b": 10},
+            "x": 0.1,
+            "xanchor": "left",
+            "y": 0,
+            "yanchor": "top",
+            "len": 0.9,
+        }]
     )
 
     # 确保输出目录存在
@@ -134,8 +160,9 @@ def plot_entropy_distribution(scores, labels, output_path, title='Attention Entr
         os.makedirs(output_dir, exist_ok=True)
 
     # 保存为HTML文件
+    logging.info(f"正在生成动画HTML文件，这可能需要一些时间，取决于样本数量...")
     fig.write_html(output_path)
-    logging.info(f"交互式熵分布图已保存至: {output_path}")
+    logging.info(f"交互式注意力动画已保存至: {output_path}")
 
     # 如果用户选择，则在浏览器中打开
     if show_plot:
@@ -217,50 +244,55 @@ def main():
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     logging.info(f"已加载数据集，包含 {len(dataset)} 个样本。")
     if args.max_samples != -1:
+        if args.max_samples > 1000:
+            logging.warning(f"选择的样本数 ({args.max_samples}) 非常大，生成的动画文件可能会很大且加载缓慢。")
         logging.info(f"将使用最多 {args.max_samples} 个样本进行可视化。")
 
-    # --- 4. 提取注意力熵 ---
-    all_scores = []
+    # --- 4. 提取注意力权重 ---
+    all_attentions = []
     all_labels = []
     total_samples_processed = 0
     with torch.no_grad():
-        for inputs, labels in tqdm(loader, desc="正在计算注意力熵"):
+        for inputs, labels in tqdm(loader, desc="正在计算注意力权重"):
             if args.max_samples != -1 and total_samples_processed >= args.max_samples:
                 break
 
             inputs = inputs.to(device)
 
             # 核心计算逻辑
-            latents = base_model.encode(inputs)
+            # 确保我们只取 latent vector (z), 兼容返回 tuple 的情况 (例如 UNet)
+            output = base_model.encode(inputs)
+            latents = output[0] if isinstance(output, tuple) else output
+
             attention_weights = memory_head(latents)
 
-            epsilon = 1e-12
-            entropy = -attention_weights * torch.log(attention_weights + epsilon)
-            entropy_scores = torch.sum(entropy, dim=1)  # 在记忆单元维度上求和
-
-            all_scores.append(entropy_scores.cpu())
+            all_attentions.append(attention_weights.cpu())
             all_labels.append(labels.cpu())
             total_samples_processed += inputs.size(0)
 
     # 拼接所有批次的数据
-    scores_tensor = torch.cat(all_scores, dim=0)
+    attentions_tensor = torch.cat(all_attentions, dim=0)
     labels_tensor = torch.cat(all_labels, dim=0)
 
     # 如果设置了max_samples，需截断数据
-    if args.max_samples != -1 and scores_tensor.shape[0] > args.max_samples:
-        scores_tensor = scores_tensor[:args.max_samples]
+    if args.max_samples != -1 and attentions_tensor.shape[0] > args.max_samples:
+        attentions_tensor = attentions_tensor[:args.max_samples]
         labels_tensor = labels_tensor[:args.max_samples]
 
-    scores_np = scores_tensor.numpy().flatten()
+    attentions_np = attentions_tensor.numpy()
     labels_np = labels_tensor.numpy().flatten()
 
-    logging.info(f"熵计算完成，共处理 {scores_np.shape[0]} 个样本。")
+    if attentions_np.shape[0] == 0:
+        logging.error("未能提取任何样本的注意力权重，无法生成动画。请检查数据和模型。")
+        return
+
+    logging.info(f"权重计算完成，共处理 {attentions_np.shape[0]} 个样本。")
 
     # --- 5. 绘图 ---
-    plot_entropy_distribution(scores_np, labels_np, args.output_file, show_plot=args.show_plot)
+    plot_attention_animation(attentions_np, labels_np, args.output_file, show_plot=args.show_plot)
 
     logging.info("-" * 40)
-    logging.info("可视化脚本执行完毕。")
+    logging.info("动画生成脚本执行完毕。")
     logging.info("-" * 40)
 
 
