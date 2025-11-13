@@ -8,6 +8,7 @@ import sys
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -229,6 +230,18 @@ def main():
         memory_head.eval()
         logging.info(f"成功从 {head_model_path} 加载记忆头")
 
+        # --- 诊断方法 2: 检查记忆矩阵自身的相似度 ---
+        with torch.no_grad():
+            logging.info("-" * 20 + " 记忆矩阵塌陷诊断 " + "-" * 20)
+            mem_norm = F.normalize(memory_head.memory, dim=1)
+            sim_matrix = torch.mm(mem_norm, mem_norm.T)
+            mean_sim = sim_matrix.mean().item()
+            std_sim = sim_matrix.std().item()
+            logging.info(f"记忆向量间余弦相似度: 平均值 = {mean_sim:.4f}, 标准差 = {std_sim:.4f}")
+            if mean_sim > 0.9 and std_sim < 0.1:
+                logging.warning("诊断警告: 记忆矩阵可能已塌陷 (所有记忆向量高度相似)。")
+            logging.info("-" * 58)
+
     except Exception as e:
         logging.error(f"初始化或加载模型失败: {e}", exc_info=True)
         return
@@ -287,6 +300,27 @@ def main():
         return
 
     logging.info(f"权重计算完成，共处理 {attentions_np.shape[0]} 个样本。")
+
+    # --- 诊断方法 1 & 3: 检查注意力权重的方差和样本间差异 ---
+    if attentions_np.shape[0] > 1:
+        logging.info("-" * 20 + " 注意力权重塌陷诊断 " + "-" * 20)
+
+        # 方法1: 看 attention 的跨样本方差
+        attention_std_per_slot = attentions_np.std(axis=0)
+        mean_std = attention_std_per_slot.mean()
+        logging.info(f"所有样本在每个记忆槽上的注意力权重的平均标准差: {mean_std:.6f}")
+        if mean_std < 1e-4:
+            logging.warning("诊断警告: 注意力权重可能已塌陷 (不同样本的注意力分布几乎没有变化)。")
+
+        # 方法3: 看不同样本的 attention 差异
+        diff_between_samples = np.mean(np.abs(attentions_np[0] - attentions_np[1]))
+        logging.info(f"前两个样本的注意力权重平均绝对差: {diff_between_samples:.6f}")
+        if diff_between_samples < 1e-3:
+            logging.warning("诊断警告: 注意力权重可能已塌陷 (前两个样本的注意力非常相似)。")
+
+        logging.info("-" * 58)
+    else:
+        logging.warning("样本数量不足 (<2)，无法执行基于多样本的注意力塌陷诊断。")
 
     # --- 5. 绘图 ---
     plot_attention_animation(attentions_np, labels_np, args.output_file, show_plot=args.show_plot)
