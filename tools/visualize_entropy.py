@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument(
         '--model_path',
         type=str,
-        default="/home/manu/mnt/8gpu_3090/afdd_models_mp_v6/phase2_best_base.pt",
+        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/phase2_best_base.pt",
         help="预训练的Phase-2模型组件的路径 (例如, '..._base.pt' 或 '..._head.pt')。")
     parser.add_argument(
         '--data_path',

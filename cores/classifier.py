@@ -428,7 +428,8 @@ class MemoryHead(nn.Module):
         # 使用归一化的点积（余弦相似度）计算注意力
         # 这比简单的矩阵乘法更稳定
         attention = F.linear(F.normalize(z_transformed, dim=1), F.normalize(self.memory, dim=1))
-        attention_weights = F.softmax(attention, dim=1)
+        # attention_weights = F.softmax(attention, dim=1)
+        attention_weights = F.softmax(attention / 1.0, dim=1)
 
         return attention_weights
 
@@ -444,7 +445,7 @@ class ClassifierCNNAE(ClassifierBase):
             ddp (bool): Flag for distributed data parallel.
         """
         super().__init__()
-        self.num_epochs = 8192 * 64
+        self.num_epochs = 32
         self.lr = 1e-4
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 2)
