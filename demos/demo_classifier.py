@@ -26,15 +26,15 @@ def parse_args():
     parser.add_argument('--path_save', default='/home/manu/tmp/xgb.pt')
     parser.add_argument('--path_label_train', default='/home/manu/tmp/afd_pm_train')
     # parser.add_argument('--path_label_test', default='/home/Huangzhe/test/afd_pm_test')
-    parser.add_argument('--path_ckpt', default="/home/manu/mnt/8gpu_3090/afdd_models_mp_v5/ae_best_e680_acc0.9818.pt")
+    parser.add_argument('--path_ckpt', default=None)
     parser.add_argument('--model_type', type=str, default='cnn-ae', choices=['cnn', 'cnn-ae'],
                         help='Type of CNN model to run: supervised (cnn) or unsupervised AE (cnn-ae)')
-    parser.add_argument('--ae_model_type', type=str, default='ae',
-                        choices=['ae', 'unet', 'mem-ae', 'unet-mem', 'mem-flow-ae'],
+    parser.add_argument('--ae_model_type', type=str, default='2d-cnn-ae-mtf',
+                        choices=['ae', 'unet', 'mem-ae', 'unet-mem', 'mem-flow-ae', '2d-cnn-ae-mtf'],
                         help="Type of AutoEncoder architecture to use.")
     parser.add_argument('--local_rank', type=int, default=0, help='Local rank for distributed training')
     parser.add_argument('--qat', default=False, help='enable quant-aware training')
-    parser.add_argument('--training_phase', type=int, default=2, choices=[1, 2],
+    parser.add_argument('--training_phase', type=int, default=1, choices=[1, 2],
                         help="Training phase for AE models: 1 for reconstruction, 2 for memory head training.")
     parser.add_argument('--hard_example_threshold', type=float, default=0.8,
                         help="For phase 2, percentile threshold for hard example mining (e.g., 0.8 means top 20% hardest).")

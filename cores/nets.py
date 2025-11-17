@@ -606,6 +606,81 @@ class NetAFDAE(nn.Module):
         return self.latent_dim
 
 
+def CBR2D(in_c, out_c, k=3, s=1, p=1):
+    """2D Conv-BatchNorm-ReLU Block."""
+    return nn.Sequential(
+        nn.Conv2d(in_c, out_c, kernel_size=k, stride=s, padding=p, bias=False),
+        nn.BatchNorm2d(out_c),
+        nn.ReLU(inplace=True)
+    )
+
+
+def DeCBR2D(in_c, out_c, k=3, s=2, p=1, op=1):
+    """2D Transposed Conv-BatchNorm-ReLU Block."""
+    return nn.Sequential(
+        nn.ConvTranspose2d(in_c, out_c, kernel_size=k, stride=s, padding=p, output_padding=op, bias=False),
+        nn.BatchNorm2d(out_c),
+        nn.ReLU(inplace=True)
+    )
+
+
+class NetAFDAE_2D_MTF(nn.Module):
+    """
+    2D Convolutional AutoEncoder for reconstructing Markov Transition Field (MTF) images.
+    Input: (B, 1, 64, 64) MTF image
+    Output: (B, 1, 64, 64) reconstructed MTF image
+    """
+
+    def __init__(self, latent_dim=128):
+        super().__init__()
+        self.latent_dim = latent_dim
+
+        # --- Encoder (64 -> 32 -> 16 -> 8 -> 4) ---
+        self.encoder_stage1 = CBR2D(1, 16, s=2, p=1)  # 64x64 -> 32x32
+        self.encoder_stage2 = CBR2D(16, 32, s=2, p=1)  # 32x32 -> 16x16
+        self.encoder_stage3 = CBR2D(32, 64, s=2, p=1)  # 16x16 -> 8x8
+        self.encoder_stage4 = CBR2D(64, 128, s=2, p=1)  # 8x8 -> 4x4
+
+        self.encoder_fc = nn.Linear(128 * 4 * 4, latent_dim)
+
+        # --- Decoder (4 -> 8 -> 16 -> 32 -> 64) ---
+        self.decoder_fc = nn.Linear(latent_dim, 128 * 4 * 4)
+        self.unflatten = lambda x: x.view(-1, 128, 4, 4)
+
+        self.decoder_stage4 = DeCBR2D(128, 64, s=2, p=1, op=1)  # 4x4 -> 8x8
+        self.decoder_stage3 = DeCBR2D(64, 32, s=2, p=1, op=1)  # 8x8 -> 16x16
+        self.decoder_stage2 = DeCBR2D(32, 16, s=2, p=1, op=1)  # 16x16 -> 32x32
+        self.decoder_stage1 = DeCBR2D(16, 16, s=2, p=1, op=1)  # 32x32 -> 64x64
+
+        self.output_conv = nn.Conv2d(16, 1, kernel_size=3, padding=1)
+
+    def encode(self, x):
+        x = self.encoder_stage1(x)
+        x = self.encoder_stage2(x)
+        x = self.encoder_stage3(x)
+        x = self.encoder_stage4(x)
+        x = x.flatten(1)
+        return self.encoder_fc(x)
+
+    def decode(self, z):
+        x = F.relu(self.decoder_fc(z))
+        x = self.unflatten(x)
+        x = self.decoder_stage4(x)
+        x = self.decoder_stage3(x)
+        x = self.decoder_stage2(x)
+        x = self.decoder_stage1(x)
+        reconstructed_x = self.output_conv(x)
+        return torch.sigmoid(reconstructed_x)  # MTF values are probabilities [0, 1]
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, None]:
+        z = self.encode(x)
+        reconstructed_x = self.decode(z)
+        return reconstructed_x, z, None
+
+    def get_latent_dim(self):
+        return self.latent_dim
+
+
 import torch.nn as nn
 
 

@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 import xgboost as xgb
 from sklearn.preprocessing import StandardScaler
+from pyts.image import MarkovTransitionField
 from torch.utils.data import TensorDataset
 
 from utils.macros import SAMPLE_RATE, MIN_VAL_TH
@@ -146,6 +147,46 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
         x_signal = F.pad(x_signal, padding, "constant", 0)
 
         return x_signal
+
+    @staticmethod
+    def transform_sample_ae_mtf(x_sample, image_size=64, n_bins=8):
+        """
+        Transforms a signal into a Markov Transition Field (MTF) image.
+        1. Normalizes the signal to [-1, 1].
+        2. Pads it to be a multiple of 32.
+        3. Resizes the signal to `image_size`.
+        4. Computes the MTF.
+        """
+        # --- 1. Normalization (same as transform_sample_ae) ---
+        x_tensor = torch.tensor(x_sample, dtype=torch.float32)
+        min_val = torch.min(x_tensor)
+        max_val = torch.max(x_tensor)
+        if (max_val - min_val) > 0:
+            x_signal_1d = 2 * (x_tensor - min_val) / (max_val - min_val) - 1
+        else:
+            x_signal_1d = torch.zeros_like(x_tensor)
+
+        # --- 2. Padding (same as transform_sample_ae) ---
+        x_signal_1d = x_signal_1d.unsqueeze(0)  # add channel dim for padding
+        current_length = x_signal_1d.shape[-1]
+        padding_required = (32 - (current_length % 32)) % 32
+        padding = (0, padding_required)
+        x_signal_padded = F.pad(x_signal_1d, padding, "constant", 0)
+
+        # --- 3. Resize signal for MTF ---
+        # pyts MTF output size is (n_timestamps, n_timestamps). We resize the signal first.
+        # Use unsqueeze to create a batch dimension for interpolate: (1, 1, seq_len)
+        resized_signal_tensor = F.interpolate(x_signal_padded.unsqueeze(0), size=image_size, mode='linear',
+                                              align_corners=False)
+        # pyts expects a 2D numpy array (n_samples, n_timestamps)
+        resized_signal_np = resized_signal_tensor.squeeze(0).numpy()
+
+        # --- 4. MTF Transformation ---
+        mtf = MarkovTransitionField(n_bins=n_bins, strategy='uniform')
+        mtf_image = mtf.fit_transform(resized_signal_np)  # output shape (1, image_size, image_size)
+
+        # Convert back to tensor, shape (1, image_size, image_size) for a single channel image
+        return torch.from_numpy(mtf_image).float().squeeze(0).unsqueeze(0)
 
     # @staticmethod
     # def transform_sample(x_sample):

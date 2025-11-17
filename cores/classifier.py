@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader, TensorDataset, Subset
 from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
                                       HDF5Dataset, HDF5SequentialSliceDataset, HDF5SPDataset)
 from cores.loss import HardExampleMiningFocalLoss
-from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet
+from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_2D_MTF
 from utils.macros import MIN_VAL_TH
 from utils.utils import make_dirs
 
@@ -445,10 +445,10 @@ class ClassifierCNNAE(ClassifierBase):
             ddp (bool): Flag for distributed data parallel.
         """
         super().__init__()
-        self.num_epochs = 32
+        self.num_epochs = 8192
         self.lr = 1e-4
-        self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
-        self.training_phase = getattr(args, 'training_phase', 2)
+        self.ae_model_type = getattr(args, 'ae_model_type', '2d-cnn-ae-mtf')
+        self.training_phase = getattr(args, 'training_phase', 1)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
         self.diversity_loss_weight = 0.5
         self.features_generator = FeaturesGeneratorCNN()
@@ -457,6 +457,12 @@ class ClassifierCNNAE(ClassifierBase):
 
         make_dirs(args.save_dir, reset=True)
 
+        # Choose the appropriate transformation function based on the model type
+        if self.ae_model_type == '2d-cnn-ae-mtf':
+            self.transform_fn = self.features_generator.transform_sample_ae_mtf
+        else:
+            self.transform_fn = self.features_generator.transform_sample_ae
+
         # --- Phase-dependent model initialization ---
         model = None
         if self.ae_model_type == 'ae':
@@ -464,6 +470,11 @@ class ClassifierCNNAE(ClassifierBase):
             self.use_mem_ae = False
         elif self.ae_model_type == 'unet':
             model = NetAFDAE_UNet().to(self.local_rank)
+            self.use_mem_ae = False
+        elif self.ae_model_type == '2d-cnn-ae-mtf':
+            if self.training_phase == 2:
+                raise ValueError("Phase 2 training is not implemented for the '2d-cnn-ae-mtf' model.")
+            model = NetAFDAE_2D_MTF().to(self.local_rank)
             self.use_mem_ae = False
         elif self.ae_model_type in ['mem-ae', 'unet-mem', 'mem-flow-ae']:
             logging.warning("Phase 1 training is for reconstruction. Forcing a non-memory AE model.")
@@ -526,7 +537,7 @@ class ClassifierCNNAE(ClassifierBase):
                             raise FileNotFoundError(f"Training data for K-Means not found: {train_data_path}")
 
                         temp_dataset = HDF5SequentialSliceDataset(train_data_path,
-                                                                  self.features_generator.transform_sample_ae,
+                                                                  self.transform_fn,
                                                                   seq_len=self.features_generator.seq_len,
                                                                   step=self.features_generator.seq_len,
                                                                   only_normal=True)
@@ -639,7 +650,7 @@ class ClassifierCNNAE(ClassifierBase):
             # Use the full, non-random dataset to calculate errors for all normal samples
             full_dataset = HDF5SequentialSliceDataset(
                 data['train_path'],
-                self.features_generator.transform_sample_ae,
+                self.transform_fn,
                 seq_len=self.features_generator.seq_len,
                 step=self.features_generator.seq_len,  # no overlap
                 only_normal=True
@@ -654,7 +665,8 @@ class ClassifierCNNAE(ClassifierBase):
                 for inputs, _ in full_loader:
                     inputs_normal = inputs.to(self.local_rank)
                     recons, _, _ = self.model(inputs_normal)
-                    errors = torch.mean((inputs_normal - recons) ** 2, dim=(1, 2)).cpu()
+                    # Generic reconstruction error calculation for 1D and 2D
+                    errors = torch.mean((inputs_normal - recons) ** 2, dim=tuple(range(1, inputs_normal.dim()))).cpu()
 
                     all_normal_inputs.append(inputs_normal.cpu())
                     all_recon_errors.append(errors)
@@ -786,7 +798,7 @@ class ClassifierCNNAE(ClassifierBase):
 
         dataset = HDF5SPDataset(
             data['train_path'],
-            self.features_generator.transform_sample_ae,
+            self.transform_fn,
             seq_len=self.features_generator.seq_len,
             min_delta=MIN_VAL_TH)
         # # 使用新的序贯滑窗数据集替换旧的随机采样数据集
@@ -868,7 +880,8 @@ class ClassifierCNNAE(ClassifierBase):
                 if val_f1_score > best_accuracy:
                     best_accuracy = val_f1_score
                     model_to_save = self.model.module if isinstance(self.model, DDP) else self.model
-                    _path_save = os.path.join(self.save_dir, f'ae_best_e{epoch}_acc{best_accuracy:.4f}.pt')
+                    # _path_save = os.path.join(self.save_dir, f'ae_best_e{epoch}_acc{best_accuracy:.4f}.pt')
+                    _path_save = os.path.join(self.save_dir, f'ae_best.pt')
                     torch.save(model_to_save.state_dict(), _path_save)
                     logging.info(
                         f'Saved new best AE model with validation accuracy: {best_accuracy:.4f} to {_path_save}')
@@ -898,7 +911,7 @@ class ClassifierCNNAE(ClassifierBase):
         # Use the same 'ae' transform as in training/evaluation
         dataset = InferenceDataset(
             x,
-            transform=self.features_generator.transform_sample_ae,
+            transform=self.transform_fn,
             seq_len=self.features_generator.seq_len
         )
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
@@ -914,7 +927,7 @@ class ClassifierCNNAE(ClassifierBase):
                 reconstructions, latents, *_ = model_to_infer(batch_x)
 
                 # 2. 计算重构误差 (Reconstruction Error)，始终计算
-                recon_error = torch.mean((batch_x - reconstructions) ** 2, dim=(1, 2))
+                recon_error = torch.mean((batch_x - reconstructions) ** 2, dim=tuple(range(1, batch_x.dim())))
 
                 # 3. 计算注意力熵 (Entropy Score)，只在阶段2计算
                 if self.training_phase == 2:
@@ -954,7 +967,7 @@ class ClassifierCNNAE(ClassifierBase):
         # 使用新的序贯切片数据集进行评估，确保覆盖所有数据
         dataset = HDF5SequentialSliceDataset(
             hdf5_file_path=test_path,
-            transform=self.features_generator.transform_sample_ae,
+            transform=self.transform_fn,
             seq_len=self.features_generator.seq_len,
             step=self.features_generator.seq_len  # step=seq_len 表示无重叠切片
         )
@@ -990,7 +1003,8 @@ class ClassifierCNNAE(ClassifierBase):
 
                 if self.training_phase == 1:
                     reconstructions, *_ = model_to_eval(inputs)
-                    scores = torch.mean((inputs - reconstructions) ** 2, dim=(1, 2)).cpu().numpy()
+                    # Generic reconstruction error calculation
+                    scores = torch.mean((inputs - reconstructions) ** 2, dim=tuple(range(1, inputs.dim()))).cpu().numpy()
                 else:  # Phase 2
                     latents = model_to_eval.encode(inputs)
                     attention_weights = self.memory_head(latents)
@@ -1000,7 +1014,7 @@ class ClassifierCNNAE(ClassifierBase):
                     reconstructions, *_ = model_to_eval(inputs)  # For plotting only
 
                 # --- 新增：查找并绘制指定次序的样本 ---
-                _save_dir = "/home/manu/tmp"
+                _save_dir = self.save_dir
                 if plot_target_label is not None and not plotted and self.rank == 0:
                     # 找到当前批次中所有目标标签的索引
                     target_indices_in_batch = (labels.view(-1) == plot_target_label).nonzero(as_tuple=True)[0]
@@ -1014,44 +1028,47 @@ class ClassifierCNNAE(ClassifierBase):
                             # 获取其在完整批次中的索引
                             idx_in_batch = target_indices_in_batch[ordinal_in_batch]
 
-                            original_signal = inputs[idx_in_batch].cpu().numpy().flatten()
-                            reconstructed_signal = reconstructions[idx_in_batch].cpu().numpy().flatten()
-                            score_for_sample = scores[idx_in_batch]
-                            pointwise_squared_error = (original_signal - reconstructed_signal) ** 2
-                            max_pointwise_error = np.mean(pointwise_squared_error)
+                            if self.ae_model_type == '2d-cnn-ae-mtf':
+                                original_image = inputs[idx_in_batch].cpu().numpy().squeeze()
+                                reconstructed_image = reconstructions[idx_in_batch].cpu().numpy().squeeze()
+                                score_for_sample = scores[idx_in_batch]
 
-                            fig, axs = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
-                            title = (
-                                f'Reconstruction of {plot_target_ordinal + 1}-th {"Positive" if plot_target_label == 1 else "Negative"} Sample\n'
-                                f'MSE: {score_for_sample:.6f} | Mean Point-wise Sq. Error: {max_pointwise_error:.6f}'
-                            ) if self.training_phase == 1 else (
-                                f'Reconstruction with Entropy Score: {score_for_sample:.6f}')
-                            fig.suptitle(title, fontsize=16)
+                                fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+                                title = (f'MTF Reconstruction of {plot_target_ordinal + 1}-th {"Positive" if plot_target_label == 1 else "Negative"} Sample\n'
+                                         f'Score: {score_for_sample:.6f}')
+                                fig.suptitle(title, fontsize=16)
 
-                            axs[0].plot(original_signal, color='blue', label='Original')
-                            axs[0].set_title('Original Signal');
-                            axs[0].legend(loc='upper right');
-                            axs[0].grid(True, linestyle='--', alpha=0.6)
+                                im1 = axs[0].imshow(original_image, cmap='rainbow', origin='lower'); axs[0].set_title('Original MTF'); fig.colorbar(im1, ax=axs[0])
+                                im2 = axs[1].imshow(reconstructed_image, cmap='rainbow', origin='lower'); axs[1].set_title('Reconstructed MTF'); fig.colorbar(im2, ax=axs[1])
+                                diff_image = np.abs(original_image - reconstructed_image)
+                                im3 = axs[2].imshow(diff_image, cmap='hot', origin='lower'); axs[2].set_title('Absolute Difference'); fig.colorbar(im3, ax=axs[2])
+                                plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
-                            axs[1].plot(reconstructed_signal, color='orange', label='Reconstructed')
-                            axs[1].set_title('Reconstructed Signal');
-                            axs[1].legend(loc='upper right');
-                            axs[1].grid(True, linestyle='--', alpha=0.6)
+                            else: # Original 1D signal plotting
+                                original_signal = inputs[idx_in_batch].cpu().numpy().flatten()
+                                reconstructed_signal = reconstructions[idx_in_batch].cpu().numpy().flatten()
+                                score_for_sample = scores[idx_in_batch]
 
-                            axs[2].plot(original_signal, label='Original', color='blue', alpha=0.9)
-                            axs[2].plot(reconstructed_signal, label='Reconstructed', color='red', linestyle='--',
-                                        alpha=0.8)
-                            axs[2].set_title('Overlay');
-                            axs[2].set_xlabel('Time Step');
-                            axs[2].legend(loc='upper right');
-                            axs[2].grid(True, linestyle='--', alpha=0.6)
+                                fig, axs = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
+                                title = (f'Reconstruction of {plot_target_ordinal + 1}-th {"Positive" if plot_target_label == 1 else "Negative"} Sample\n'
+                                         f'MSE: {score_for_sample:.6f}') if self.training_phase == 1 else (
+                                    f'Reconstruction with Entropy Score: {score_for_sample:.6f}')
+                                fig.suptitle(title, fontsize=16)
 
-                            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-                            plot_filename = f'reconstruction_{"positive" if plot_target_label == 1 else "negative"}_sample_{plot_target_ordinal + 1}.png'
-                            plot_filename = os.path.join(_save_dir, plot_filename)
-                            plt.savefig(plot_filename)
-                            logging.info(f"Saved reconstruction plot to '{plot_filename}'")
-                            plt.close(fig)
+                                axs[0].plot(original_signal, color='blue', label='Original'); axs[0].set_title('Original Signal'); axs[0].legend(loc='upper right'); axs[0].grid(True, linestyle='--', alpha=0.6)
+                                axs[1].plot(reconstructed_signal, color='orange', label='Reconstructed'); axs[1].set_title('Reconstructed Signal'); axs[1].legend(loc='upper right'); axs[1].grid(True, linestyle='--', alpha=0.6)
+                                axs[2].plot(original_signal, label='Original', color='blue', alpha=0.9); axs[2].plot(reconstructed_signal, label='Reconstructed', color='red', linestyle='--', alpha=0.8); axs[2].set_title('Overlay'); axs[2].set_xlabel('Time Step'); axs[2].legend(loc='upper right'); axs[2].grid(True, linestyle='--', alpha=0.6)
+                                plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+                            if _save_dir:
+                                plot_filename = f'reconstruction_{"positive" if plot_target_label == 1 else "negative"}_sample_{plot_target_ordinal + 1}.png'
+                                plot_path = os.path.join(_save_dir, plot_filename)
+                                plt.savefig(plot_path)
+                                logging.info(f"Saved reconstruction plot to '{plot_path}'")
+                            else:
+                                logging.warning("Save directory (--save_dir) not specified, cannot save reconstruction plot.")
+
+                            plt.close(fig) # Always close figure to free memory
                             plotted = True
                         except ImportError:
                             logging.warning(
