@@ -63,6 +63,9 @@ class ArcDetector:
         self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter()
         # self.filter_b, self.filter_a, self.filter_zi_org = self._design_highpass_filter_lp()
         self.filter_zi = self.filter_zi_org
+        # Add a new filter for current signal. The original one is used for voltage in infer_v6.
+        self.filter_b_current, self.filter_a_current, self.filter_zi_org_current = self._design_highpass_filter_current()
+        self.filter_zi_current = self.filter_zi_org_current
         self.sample_win_size = self.sample_rate  # 1s
         self.sample_cnt = 1024
         self.samples_neg, self.samples_pos = list(), list()
@@ -288,7 +291,17 @@ class ArcDetector:
         self.samples_neg.clear()
         self.samples_pos.clear()
         self.filter_zi = self.filter_zi_org
+        self.filter_zi_current = self.filter_zi_org_current
         self.db.reset()
+
+    def _design_highpass_filter_current(self):
+        nyq = 0.5 * 20000  # 采样率 20k 时等于 10000 Hz
+        cutoff_freq = 50.0  # 希望截止频率 50 Hz
+        normal_cutoff = cutoff_freq / nyq  # 归一化截止频率 0.005
+        rs = 64  # 阻带衰减
+        b, a = cheby2(self.filter_order, rs, normal_cutoff, btype='high', analog=False)
+        zi = lfilter_zi(b, a)
+        return b, a, zi
 
     def _design_highpass_filter(self):
         nyq = 0.5 * self.sample_rate
@@ -432,6 +445,10 @@ class ArcDetector:
 
     def _realtime_highpass_filter(self, cur_sample):
         y, zo = lfilter(self.filter_b, self.filter_a, [cur_sample], zi=self.filter_zi)
+        return y[0], zo
+
+    def _realtime_highpass_filter_current(self, cur_sample):
+        y, zo = lfilter(self.filter_b_current, self.filter_a_current, [cur_sample], zi=self.filter_zi_current)
         return y[0], zo
 
     def infer_v1(self):
@@ -1108,6 +1125,12 @@ class ArcDetector:
         _power_pick_voltage = self.db.db['rt'].seq_power_voltage[-1]
         filtered_sample, self.filter_zi = self._realtime_highpass_filter(_power_pick_voltage)
         self.db.db['rt'].seq_filtered[-1] = filtered_sample * self.indicator_max_val / 32
+
+        # Filter for current and plot it using seq_state_pred_idle
+        filtered_sample_current, self.filter_zi_current = self._realtime_highpass_filter_current(power_pick)
+        # Scale and offset for visualization on the plot
+        self.db.db['rt'].seq_filter_envelope[-1] = filtered_sample_current * self.indicator_max_val / 32
+
         self.power_mean = self.power_mean * (1 - self.pm_lr) + power_pick * self.pm_lr if self.power_mean > 0 \
             else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
         self.db.db['rt'].seq_power_mean[-1] = self.power_mean
@@ -1176,7 +1199,7 @@ class ArcDetector:
         _data = _seq_pick[np.newaxis, :]
         _score, _latent, _entropy_score = self.classifier.infer(_data, batch_size=1)
         _latent = _latent.flatten()
-        _score = _score[0] * 1e1 * 32  # 32 for current signal
+        _score = _score[0] * 1e1 * 16  # 32 for current signal
 
         self.db.db['rt'].seq_state_pred_balcony[peak_idx - self.af_win_size:peak_idx] = \
             [_entropy_score[0] * 512] * self.af_win_size  # Scale for visualization
