@@ -38,6 +38,8 @@ def parse_args():
                         help="Training phase for AE models: 1 for reconstruction, 2 for memory head training.")
     parser.add_argument('--hard_example_threshold', type=float, default=0.8,
                         help="For phase 2, percentile threshold for hard example mining (e.g., 0.8 means top 20% hardest).")
+    parser.add_argument('--contrastive_loss_weight', type=float, default=0.5,
+                        help="Weight for the contrastive loss in phase 1. Default 0.0 to disable.")
     return parser.parse_args()
 
 

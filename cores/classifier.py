@@ -20,7 +20,8 @@ from torch.testing import assert_close
 from torch.utils.data import DataLoader, TensorDataset, Subset
 
 from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
-                                      HDF5Dataset, HDF5SequentialSliceDataset, HDF5SPDataset)
+                                      HDF5Dataset, HDF5SequentialSliceDataset, HDF5SPDataset,
+                                      generate_augmented_samples)
 from cores.loss import HardExampleMiningFocalLoss
 from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_2D_MTF
 from utils.macros import MIN_VAL_TH
@@ -451,6 +452,9 @@ class ClassifierCNNAE(ClassifierBase):
         self.training_phase = getattr(args, 'training_phase', 1)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
         self.diversity_loss_weight = 0.5
+        self.contrastive_loss_weight = getattr(args, 'contrastive_loss_weight', 0.0)
+        if self.contrastive_loss_weight > 0 and self.training_phase == 1:
+            logging.info(f"Contrastive learning enabled in phase 1 with weight: {self.contrastive_loss_weight}")
         self.features_generator = FeaturesGeneratorCNN()
         self.rank = args.rank
         self.local_rank = args.rank
@@ -820,10 +824,11 @@ class ClassifierCNNAE(ClassifierBase):
             if is_distributed:
                 train_sampler.set_epoch(epoch)
             epoch_loss = 0.0
-            epoch_recon_loss, epoch_sparsity_loss, epoch_flow_loss = 0.0, 0.0, 0.0
+            epoch_recon_loss, epoch_sparsity_loss, epoch_flow_loss, epoch_contrastive_loss = 0.0, 0.0, 0.0, 0.0
             num_batches = 0
             for inputs, labels in loader:  # Labels are used to filter for normal data
                 # Filter for normal data (label == 0)
+                # --- FIX: Define inputs_normal at the beginning of the loop ---
                 normal_indices = (labels.view(-1) == 0)
                 if not torch.any(normal_indices):
                     continue
@@ -831,6 +836,7 @@ class ClassifierCNNAE(ClassifierBase):
                 inputs_normal = inputs[normal_indices].to(self.local_rank)
 
                 # Unpack model outputs
+                # Base reconstruction loss is always calculated
                 model_outputs = self.model(inputs_normal)
                 reconstructions, _, aux_output = model_outputs[:3]
                 recon_loss = self.criterion(reconstructions, inputs_normal)
@@ -849,6 +855,23 @@ class ClassifierCNNAE(ClassifierBase):
                     flow_loss = -log_prob.mean()  # Minimize negative log-likelihood
                     loss += self.flow_loss_weight * flow_loss
 
+                # --- Add Contrastive Loss ---
+                if self.contrastive_loss_weight > 0:
+                    # 1. Generate augmented samples (phase-shifted)
+                    inputs_aug = generate_augmented_samples(inputs_normal)
+
+                    # 2. Get embeddings for original and augmented samples
+                    model_to_encode = self.model.module if isinstance(self.model, DDP) else self.model
+                    # Handle tuple output from encode method (e.g., NetAFDAE_UNet)
+                    latents_orig = model_to_encode.encode(inputs_normal)
+                    if isinstance(latents_orig, tuple): latents_orig = latents_orig[0]
+                    latents_aug = model_to_encode.encode(inputs_aug)
+                    if isinstance(latents_aug, tuple): latents_aug = latents_aug[0]
+
+                    # 3. Calculate cosine similarity loss and add to total loss
+                    contrastive_loss = 1 - F.cosine_similarity(latents_orig, latents_aug, dim=1).mean()
+                    loss += self.contrastive_loss_weight * contrastive_loss
+
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
@@ -859,6 +882,8 @@ class ClassifierCNNAE(ClassifierBase):
                     epoch_sparsity_loss += sparsity_loss.item()
                 if self.ae_model_type == 'mem-flow-ae':
                     epoch_flow_loss += flow_loss.item()
+                if self.contrastive_loss_weight > 0:
+                    epoch_contrastive_loss += contrastive_loss.item()
                 num_batches += 1
 
             self.scheduler.step()
@@ -867,14 +892,15 @@ class ClassifierCNNAE(ClassifierBase):
             avg_recon_loss = epoch_recon_loss / num_batches if num_batches > 0 else 0
             avg_sparsity_loss = epoch_sparsity_loss / num_batches if num_batches > 0 else 0
             avg_flow_loss = epoch_flow_loss / num_batches if num_batches > 0 else 0
+            avg_contrastive_loss = epoch_contrastive_loss / num_batches if num_batches > 0 else 0
 
             val_f1_score = self.evaluate(data['test_path']) if not loss_ckp else 1 - avg_epoch_loss
             epoch_duration = time.time() - epoch_start_time
 
             if self.rank == 0:
                 current_lr = self.optimizer.param_groups[0]['lr']
-                log_msg = (f'Phase 1 - Epoch [{epoch + 1}/{self.num_epochs}], LR: {current_lr:.2e}, '
-                           f'Time: {epoch_duration:.2f}s, Val F1: {val_f1_score:.4f}, Train Loss: {avg_epoch_loss:.8f}')
+                log_msg = (f'Phase 1 - Epoch [{epoch + 1}/{self.num_epochs}]: LR: {current_lr:.2e}, Time: {epoch_duration:.2f}s, Val F1: {val_f1_score:.4f}, '
+                           f'Loss: {avg_epoch_loss:.6f} (Recon: {avg_recon_loss:.6f}, Contrastive: {avg_contrastive_loss:.6f})')
                 logging.info(log_msg)
 
                 if val_f1_score > best_accuracy:

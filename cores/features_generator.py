@@ -1,3 +1,4 @@
+import logging
 import random
 
 import h5py
@@ -5,13 +6,66 @@ import numpy as np
 import pywt
 import torch
 import torch.nn.functional as F
-import xgboost as xgb
 from sklearn.preprocessing import StandardScaler
 from pyts.image import MarkovTransitionField
 from torch.utils.data import TensorDataset
 
 from utils.macros import SAMPLE_RATE, MIN_VAL_TH
 
+
+def estimate_period_brute_force(x, T_min_ratio=0.2, T_max_ratio=0.9):
+    """
+    通过暴力搜索（归一化互相关）来估计信号的周期长度。
+    """
+    n = len(x)
+    T_min = int(n * T_min_ratio)
+    T_max = int(n * T_max_ratio)
+
+    if T_min < 10: T_min = 10
+    if T_max <= T_min:
+        return n // 2
+
+    x_norm = x - np.mean(x)
+    best_corr = -1
+    best_T = T_min
+
+    for T in range(T_min, T_max):
+        sig1 = x_norm[:n - T]
+        sig2 = x_norm[T:]
+        corr = np.corrcoef(sig1, sig2)[0, 1]
+
+        if corr > best_corr:
+            best_corr = corr
+            best_T = T
+
+    return best_T
+
+
+def generate_augmented_samples(batch_tensor: torch.Tensor) -> torch.Tensor:
+    """
+    对一批信号进行周期扩展和随机相位移位，以生成增强样本。
+    """
+    augmented_list = []
+    for i in range(batch_tensor.shape[0]):
+        # Squeeze to 1D numpy array for processing
+        signal_np = batch_tensor[i].cpu().numpy().flatten()
+        # period_len = estimate_period_brute_force(signal_np)
+        # print(f"period_len --> {period_len}")
+        period_len = 334  # hard code for performance
+
+        # Ensure period_len is valid before proceeding
+        if period_len <= 0: period_len = 1
+
+        template = signal_np[:period_len]
+        num_repeats = (len(signal_np) // period_len) + 2
+        long_signal = np.tile(template, num_repeats)
+        start_index = random.randint(0, period_len - 1)
+        aug_sample_np = long_signal[start_index: start_index + len(signal_np)]
+        # Reshape back to [1, 1, L] to match model input
+        aug_sample_tensor = torch.from_numpy(aug_sample_np).float().view(1, 1, -1)
+        augmented_list.append(aug_sample_tensor)
+    # Concatenate list of tensors into a single batch tensor
+    return torch.cat(augmented_list, dim=0).to(batch_tensor.device)
 
 class FeaturesGeneratorBase:
     def __init__(self):
@@ -90,6 +144,8 @@ class FeaturesGeneratorXGB(FeaturesGeneratorBase):
             features_lst.append(_features)
             feature_names_lst.extend(_feature_names)
         features_final = np.concatenate(features_lst, axis=1)
+        # This part is specific to XGBoost, so it's kept here.
+        import xgboost as xgb
         self.feature_names = feature_names_lst
         features = xgb.DMatrix(features_final, label=y, feature_names=self.feature_names)
         return features
