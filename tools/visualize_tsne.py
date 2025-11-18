@@ -1,5 +1,3 @@
-# FILE: visualize_tsne.py
-
 import argparse
 import logging
 import os
@@ -55,7 +53,7 @@ def parse_args():
     parser.add_argument(
         '--data_path',
         type=str,
-        default="/home/manu/tmp/afd_pm_hdf5/test_data.h5",
+        default="/media/manu/ST8000DM004-2U91/tmp/afd.h5.v1",
         help="HDF5数据文件 (例如, test_data.h5) 的路径。")
     parser.add_argument(
         '--ae_model_type',
@@ -86,8 +84,13 @@ def parse_args():
     parser.add_argument(
         '--max_samples',
         type=int,
-        default=10000,
+        default=-1,
         help="用于t-SNE可视化的最大样本数。设为-1表示使用所有样本。")
+    parser.add_argument(
+        '--error_threshold',
+        type=float,
+        default=0.01,
+        help="重构误差阈值，用于高亮显示'难重构'的正常样本。")
     parser.add_argument(
         '--show_plot',
         action='store_true',
@@ -95,31 +98,64 @@ def parse_args():
     return parser.parse_args()
 
 
-def plot_tsne_3d(tsne_data, labels, output_path, title='Latent Space 3D t-SNE Visualization', show_plot=False):
+def plot_tsne_3d(tsne_data, labels, recon_errors, output_path, error_threshold,
+                 title='Latent Space 3D t-SNE Visualization', show_plot=False):
     """
     使用Plotly生成并保存一个可交互的3D t-SNE散点图。
+    新增功能: 将误差高于阈值的正常样本用黄色高亮。
     """
     fig = go.Figure()
 
-    # 分离正负样本的索引
+    # --- 1. 分离正例（故障）样本 ---
     pos_indices = np.where(labels == 1)[0]
-    neg_indices = np.where(labels == 0)[0]
 
-    # 绘制负例（正常）样本
+    # --- 2. 将正常样本根据重构误差分为两组 ---
+    # 首先获取所有正常样本的索引
+    all_neg_indices = np.where(labels == 0)[0]
+
+    # 在正常样本中，根据误差阈值筛选“简单”和“困难”的样本
+    neg_errors = recon_errors[all_neg_indices]
+    easy_neg_indices = all_neg_indices[neg_errors <= error_threshold]
+    hard_neg_indices = all_neg_indices[neg_errors > error_threshold]
+
+    logging.info("-" * 30)
+    logging.info(f"绘图点数统计:")
+    logging.info(f"  - 正常 (误差 <= {error_threshold:.4f}): {len(easy_neg_indices)} 个")
+    logging.info(f"  - 正常 (误差 >  {error_threshold:.4f}): {len(hard_neg_indices)} 个 (将用黄色高亮)")
+    logging.info(f"  - 故障: {len(pos_indices)} 个")
+    logging.info("-" * 30)
+
+    # --- 3. 依次绘制三个类别的点 ---
+    # 绘制“简单”的正常样本（蓝色）
     fig.add_trace(go.Scatter3d(
-        x=tsne_data[neg_indices, 0],
-        y=tsne_data[neg_indices, 1],
-        z=tsne_data[neg_indices, 2],
+        x=tsne_data[easy_neg_indices, 0],
+        y=tsne_data[easy_neg_indices, 1],
+        z=tsne_data[easy_neg_indices, 2],
         mode='markers',
         marker=dict(
             size=3,
             color='blue',
-            opacity=0.6,
+            opacity=0.5,
         ),
-        name='Negative (Normal)'
+        name=f'Normal (Easy, err &le; {error_threshold:.4f})'
     ))
 
-    # 绘制正例（故障）样本
+    # 绘制“困难”的正常样本（黄色）
+    fig.add_trace(go.Scatter3d(
+        x=tsne_data[hard_neg_indices, 0],
+        y=tsne_data[hard_neg_indices, 1],
+        z=tsne_data[hard_neg_indices, 2],
+        mode='markers',
+        marker=dict(
+            size=4,
+            color='yellow',
+            opacity=0.9,
+            line=dict(width=0.5, color='DarkSlateGrey')  # 给黄点加个边框更清晰
+        ),
+        name=f'Normal (Hard, err > {error_threshold:.4f})'
+    ))
+
+    # 绘制故障样本（红色）
     fig.add_trace(go.Scatter3d(
         x=tsne_data[pos_indices, 0],
         y=tsne_data[pos_indices, 1],
@@ -218,9 +254,10 @@ def main():
     if args.max_samples != -1:
         logging.info(f"将使用最多 {args.max_samples} 个样本进行可视化。")
 
-    # --- 4. 提取特征 ---
+    # --- 4. 提取特征和重构误差 ---
     all_features = []
     all_labels = []
+    all_recon_errors = []
     total_samples_processed = 0
     with torch.no_grad():
         for inputs, labels in tqdm(loader, desc="正在提取特征"):
@@ -229,10 +266,13 @@ def main():
 
             inputs = inputs.to(device)
 
-            # 根据模型类型提取潜在向量
-            # 我们约定对于所有自编码器类的模型，其 forward 方法返回的第二个元素 ([1]) 是潜在特征 z
+            # 模型输出约定: (reconstructions, latent_vectors, ...)
             model_outputs = model(inputs)
+            reconstructions = model_outputs[0]
             latent_vectors = model_outputs[1]
+
+            # 计算每个样本的均方重构误差
+            recon_errors = torch.mean((inputs - reconstructions) ** 2, dim=tuple(range(1, inputs.dim())))
 
             # 将特征向量展平为 [N, feature_dim]
             if latent_vectors.dim() > 2:
@@ -240,20 +280,24 @@ def main():
 
             all_features.append(latent_vectors.cpu())
             all_labels.append(labels.cpu())
+            all_recon_errors.append(recon_errors.cpu())
             total_samples_processed += inputs.size(0)
 
     # 拼接所有批次的数据
     features_tensor = torch.cat(all_features, dim=0)
     labels_tensor = torch.cat(all_labels, dim=0)
+    errors_tensor = torch.cat(all_recon_errors, dim=0)
 
     # 如果设置了max_samples，需截断数据
     if args.max_samples != -1 and features_tensor.shape[0] > args.max_samples:
         features_tensor = features_tensor[:args.max_samples]
         labels_tensor = labels_tensor[:args.max_samples]
+        errors_tensor = errors_tensor[:args.max_samples]
 
     features_np = features_tensor.numpy()
     # labels通常是 [N, 1]，需展平为 [N]
     labels_np = labels_tensor.numpy().flatten()
+    errors_np = errors_tensor.numpy()
 
     logging.info(f"特征提取完成，共 {features_np.shape[0]} 个样本，特征维度为 {features_np.shape[1]}。")
 
@@ -277,7 +321,8 @@ def main():
         tsne_results = tsne.fit_transform(features_np)
         logging.info("t-SNE变换完成。")
 
-        plot_tsne_3d(tsne_results, labels_np, args.output_file, show_plot=args.show_plot)
+        plot_tsne_3d(tsne_results, labels_np, errors_np, args.output_file,
+                     error_threshold=args.error_threshold, show_plot=args.show_plot)
     else:
         logging.error("无法执行t-SNE，因为样本数量过少 (<=1)。")
 
