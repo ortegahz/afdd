@@ -1207,7 +1207,7 @@ class ArcDetector:
         _is_arc_by_model = _score * self.indicator_max_val > _th_raw
         _is_arc = _is_arc_by_model
 
-        if _is_arc: print(f"_entropy_score[0] -- > {_entropy_score[0]}")
+        # if _is_arc: print(f"_entropy_score[0] -- > {_entropy_score[0]}")
 
         # is_inference_mode = not feat_sample and not blacklist_sample
 
