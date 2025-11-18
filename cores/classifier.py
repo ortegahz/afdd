@@ -445,9 +445,9 @@ class ClassifierCNNAE(ClassifierBase):
             ddp (bool): Flag for distributed data parallel.
         """
         super().__init__()
-        self.num_epochs = 8192
+        self.num_epochs = 1024
         self.lr = 1e-4
-        self.ae_model_type = getattr(args, 'ae_model_type', '2d-cnn-ae-mtf')
+        self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 1)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
         self.diversity_loss_weight = 0.5
