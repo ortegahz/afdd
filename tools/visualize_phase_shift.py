@@ -102,9 +102,10 @@ def estimate_period_brute_force(x, T_min_ratio=0.2, T_max_ratio=0.9):
     return best_T
 
 
-def generate_continuous_signal(x, num_periods_to_generate, crossfade_ratio=0.1):
+def generate_continuous_signal(x, num_periods_to_generate):
     """
-    从一个不完整周期的样本中，生成一个平滑、连续的多周期信号。
+    从一个不完整周期的样本中，通过直接重复拼接，生成一个多周期信号。
+    注意：此版本移除了交叉渐变，可能会在拼接处产生不连续的跳变。
     """
     # 1. 估计单个周期的精确长度
     period_samples = estimate_period_brute_force(x)
@@ -112,32 +113,12 @@ def generate_continuous_signal(x, num_periods_to_generate, crossfade_ratio=0.1):
     # 2. 提取一个周期的模板
     if len(x) < period_samples:
         logging.error("输入信号长度小于一个估计周期，无法生成。")
-        return None
+        return None, None
     template_period = x[0:period_samples]
 
-    # 3. 通过首尾交叉渐变，使模板无缝
-    fade_len = int(period_samples * crossfade_ratio)
-    if fade_len == 0:
-        logging.warning("周期太短，无法应用交叉渐变。可能会有轻微跳变。")
-        return np.tile(template_period, num_periods_to_generate)
-
-    # 创建渐变窗口
-    fade_out_window = np.linspace(1, 0, fade_len)
-    fade_in_window = np.linspace(0, 1, fade_len)
-
-    # 提取模板的开头和结尾部分
-    end_part = template_period[-fade_len:]
-    start_part = template_period[0:fade_len]
-
-    # 应用交叉渐变，生成一个能平滑连接尾部和头部的“接头”
-    blended_join = end_part * fade_out_window + start_part * fade_in_window
-
-    # 构建无缝模板
-    # 错误根源在于直接替换结尾，而未改变开头。
-    # 正确做法是：将原始模板中渐变区之后的部分作为主体，再把“接头”拼在末尾。
-    # 这样，“接头”就充当了下一个周期的平滑“开头”。
-    main_part = template_period[fade_len:]
-    seamless_template = np.concatenate((main_part, blended_join))
+    # 3. 直接使用提取的周期作为“无缝模板”进行拼接
+    # （注意：由于未进行平滑处理，拼接处可能不连续）
+    seamless_template = template_period
 
     # 4. 拼接成多周期信号
     continuous_signal = np.tile(seamless_template, num_periods_to_generate)
@@ -219,7 +200,7 @@ def main():
     # 生成连续信号
     generated_signal, seamless_template = generate_continuous_signal(original_waveform, args.num_periods)
 
-    if generated_signal is None:
+    if generated_signal is None or seamless_template is None:
         return
 
     logging.info("连续信号生成完成。")
