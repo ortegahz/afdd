@@ -523,7 +523,8 @@ class NetAFDAE(nn.Module):
         self.latent_dim = latent_dim
         # 确认输入长度与原始模型一致
         _channel_in = int(SAMPLE_RATE / 50)
-        in_len = ((_channel_in // 32) + 1) * 32
+        # in_len = ((_channel_in // 32) + 1) * 32
+        in_len = _channel_in
         assert in_len == 448, "Input length must be 448 for this architecture"
 
         # ----------------- 编码器 (Encoder) -----------------
