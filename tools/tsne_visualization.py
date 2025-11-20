@@ -87,7 +87,7 @@ def parse_args():
     parser.add_argument(
         '--n_clusters',
         type=int,
-        default=3,
+        default=24,
         help="对Hard Normal样本进行K-Means聚类的簇数量。")
     parser.add_argument(
         '--max_samples',
@@ -153,34 +153,9 @@ def plot_tsne_3d(tsne_data, tsne_centers, labels, recon_errors, hard_norm_cluste
     ))
 
     # 绘制“困难”的正常样本（基于K-Means聚类结果绘制不同深浅的黄色/橙色）
-    # 定义一组暖色调颜色，既保持“黄色”警示感，又能区分簇
-    import plotly.colors as pc
-    colors = pc.qualitative.Dark24  # 使用包含多种颜色的色盘，或者使用特定的 ['gold', 'orange', 'darkorange', ...]
-
     unique_clusters = np.unique(hard_norm_cluster_labels) if hard_norm_cluster_labels is not None else []
 
-    for i, c_id in enumerate(unique_clusters):
-        # 获取属于该簇的原始索引（注意：hard_norm_cluster_labels 的顺序对应 hard_neg_indices）
-        current_cluster_mask = (hard_norm_cluster_labels == c_id)
-        data_indices = hard_neg_indices[current_cluster_mask]
-
-        color_idx = i % len(colors)
-        fig.add_trace(go.Scatter3d(
-            x=tsne_data[data_indices, 0],
-            y=tsne_data[data_indices, 1],
-            z=tsne_data[data_indices, 2],
-            mode='markers',
-            marker=dict(
-                size=4,
-                color=colors[color_idx],  # 使用不同颜色区分Cluster
-                opacity=0.9,
-                symbol='circle',
-                line=dict(width=0.5, color='DarkSlateGrey')
-            ),
-            name=f'Hard Normal - Cluster {c_id}'
-        ))
-
-    # 绘制聚类中心 (大号 'X' 标记)
+    # --- 调整绘制顺序：先画聚类中心 (Black)，作为背景 ---
     if tsne_centers is not None and len(tsne_centers) > 0:
         fig.add_trace(go.Scatter3d(
             x=tsne_centers[:, 0],
@@ -188,14 +163,53 @@ def plot_tsne_3d(tsne_data, tsne_centers, labels, recon_errors, hard_norm_cluste
             z=tsne_centers[:, 2],
             mode='markers+text',
             marker=dict(
-                size=8,
+                size=3,  # 稍微改小一点，避免完全遮挡
                 color='black',
-                symbol='x',
-                line=dict(width=2)
+                symbol='circle',
+                opacity=0.6, # 稍微透明一点
+                line=dict(width=0)
             ),
             text=[f'C{i}' for i in range(len(tsne_centers))],
             textposition="top center",
             name='Cluster Centers'
+        ))
+
+    for i, c_id in enumerate(unique_clusters):
+        # 获取属于该簇的原始索引（注意：hard_norm_cluster_labels 的顺序对应 hard_neg_indices）
+        current_cluster_mask = (hard_norm_cluster_labels == c_id)
+        data_indices = hard_neg_indices[current_cluster_mask]
+
+        # 绘制连接样本到聚类中心的连线
+        if tsne_centers is not None and len(tsne_centers) > c_id:
+            center_pt = tsne_centers[c_id]
+            cluster_pts = tsne_data[data_indices]
+            # 构造线段数据: Point -> Center -> None (断开)
+            line_x, line_y, line_z = [], [], []
+            for pt in cluster_pts:
+                line_x.extend([pt[0], center_pt[0], None])
+                line_y.extend([pt[1], center_pt[1], None])
+                line_z.extend([pt[2], center_pt[2], None])
+
+            fig.add_trace(go.Scatter3d(
+                x=line_x, y=line_y, z=line_z,
+                mode='lines',
+                line=dict(color='rgba(255, 215, 0, 0.3)', width=1),  # 半透明淡黄色连线
+                hoverinfo='skip', showlegend=False
+            ))
+
+        fig.add_trace(go.Scatter3d(
+            x=tsne_data[data_indices, 0],
+            y=tsne_data[data_indices, 1],
+            z=tsne_data[data_indices, 2],
+            mode='markers',
+            marker=dict(
+                size=4,
+                color='yellow',  # 统一使用黄色
+                opacity=0.9,
+                symbol='circle',
+                line=dict(width=0.5, color='DarkSlateGrey')
+            ),
+            name=f'Hard Normal - Cluster {c_id}'
         ))
 
     # 绘制故障样本（红色）
