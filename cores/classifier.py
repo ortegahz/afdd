@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader, TensorDataset, Subset
 
 from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
                                       HDF5Dataset, HDF5SequentialSliceDataset, HDF5SPDataset,
-                                      generate_augmented_samples)
+                                      generate_augmented_samples, HDF5PeakAlignedDataset)
 from cores.loss import HardExampleMiningFocalLoss
 from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_2D_MTF
 from utils.macros import MIN_VAL_TH
@@ -800,19 +800,11 @@ class ClassifierCNNAE(ClassifierBase):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
 
-        dataset = HDF5SPDataset(
+        dataset = HDF5PeakAlignedDataset(
             data['train_path'],
             self.transform_fn,
             seq_len=self.features_generator.seq_len,
             min_delta=MIN_VAL_TH)
-        # # 使用新的序贯滑窗数据集替换旧的随机采样数据集
-        # # 步长 step 设为 seq_len // 4 提供了75%的重叠，是一种有效的数据增强
-        # dataset = HDF5SequentialSliceDataset(
-        #     hdf5_file_path=data['train_path'],
-        #     transform=self.features_generator.transform_sample_ae,
-        #     seq_len=self.features_generator.seq_len,
-        #     step=self.features_generator.seq_len // 8
-        # )
 
         is_distributed = isinstance(self.model, DDP)
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None
@@ -991,11 +983,11 @@ class ClassifierCNNAE(ClassifierBase):
         6. 打印详细的统计信息并返回总体准确率。
         """
         # 使用新的序贯切片数据集进行评估，确保覆盖所有数据
-        dataset = HDF5SequentialSliceDataset(
+        dataset = HDF5PeakAlignedDataset(
             hdf5_file_path=test_path,
             transform=self.transform_fn,
             seq_len=self.features_generator.seq_len,
-            step=self.features_generator.seq_len  # step=seq_len 表示无重叠切片
+            min_delta=MIN_VAL_TH
         )
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 

@@ -45,7 +45,7 @@ def parse_args():
     parser.add_argument(
         '--data_path',
         type=str,
-        default="/media/manu/ST8000DM004-2U91/tmp/afd.h5.v1",
+        default="/media/manu/ST8000DM004-2U91/tmp/afd.h5.v2",
         help="包含数据的 HDF5 文件路径。")
     parser.add_argument(
         '--output_file',
