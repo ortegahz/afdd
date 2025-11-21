@@ -1,4 +1,3 @@
-import logging
 import random
 
 import h5py
@@ -6,8 +5,9 @@ import numpy as np
 import pywt
 import torch
 import torch.nn.functional as F
-from sklearn.preprocessing import StandardScaler
 from pyts.image import MarkovTransitionField
+from scipy.signal import find_peaks
+from sklearn.preprocessing import StandardScaler
 from torch.utils.data import TensorDataset
 
 from utils.macros import SAMPLE_RATE, MIN_VAL_TH
@@ -66,6 +66,7 @@ def generate_augmented_samples(batch_tensor: torch.Tensor) -> torch.Tensor:
         augmented_list.append(aug_sample_tensor)
     # Concatenate list of tensors into a single batch tensor
     return torch.cat(augmented_list, dim=0).to(batch_tensor.device)
+
 
 class FeaturesGeneratorBase:
     def __init__(self):
@@ -549,4 +550,53 @@ class HDF5SequentialSliceDataset(torch.utils.data.Dataset):
         y_tensor = torch.tensor(y_label, dtype=torch.float32).view(-1)
 
         # 8. 返回处理好的信号张量和标签张量，这是DataLoader期望的格式。
+        return x_signal, y_tensor
+
+
+class HDF5PeakAlignedDataset(torch.utils.data.Dataset):
+    """
+    HDF5 Peak Aligned Dataset.
+    Initialization scans for peaks using a sliding window approach (find_peaks).
+    Samples are generated such that the peak is aligned at the very end of the sequence.
+    """
+
+    def __init__(self, hdf5_file_path, transform, seq_len, min_delta=MIN_VAL_TH):
+        self.hdf5_file_path = hdf5_file_path
+        self.transform = transform
+        self.seq_len = seq_len
+        self.hdf5_file = None
+        self.samples = []  # Stores tuples of (group_key, slice_end_index)
+
+        # Scan file to find all valid peaks for alignment
+        with h5py.File(self.hdf5_file_path, 'r') as f:
+            for key in f.keys():
+                signal = f[key]['signal'][:]
+                # Find peaks with prominence > min_delta to ensure they are significant
+                # distance ensures we don't over-sample the same event too densely
+                peaks, _ = find_peaks(signal, distance=seq_len // 2, prominence=min_delta)
+
+                for p in peaks:
+                    # Ensure we have enough history to place the peak at the end
+                    # The slice will be [p - seq_len + 1 : p + 1]
+                    if p >= self.seq_len - 1:
+                        # Store the index (p + 1) which is the exclusive end index for slicing
+                        self.samples.append((key, p + 1))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        if self.hdf5_file is None:
+            self.hdf5_file = h5py.File(self.hdf5_file_path, 'r')
+
+        key, end_idx = self.samples[idx]
+        start_idx = end_idx - self.seq_len
+
+        group = self.hdf5_file[key]
+        x_sample = group['signal'][start_idx:end_idx].astype(np.float32)
+        y_label = 1 if np.any(group['label_seq'][start_idx:end_idx] > 0) else 0
+
+        x_signal = self.transform(x_sample)
+        y_tensor = torch.tensor(y_label, dtype=torch.float32).view(-1)
+
         return x_signal, y_tensor
