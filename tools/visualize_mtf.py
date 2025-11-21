@@ -53,7 +53,7 @@ def parse_args():
     parser.add_argument(
         '--data_path',
         type=str,
-        default="/home/manu/tmp/afd_pm_hdf5/test_data.h5",
+        default="/media/manu/ST8000DM004-2U91/tmp/afd.h5.v1",
         help="包含测试数据的 HDF5 文件路径。")
     parser.add_argument(
         '--output_file',
@@ -63,7 +63,7 @@ def parse_args():
     parser.add_argument(
         '--max_samples',
         type=int,
-        default=200,
+        default=8,
         help="用于可视化的最大样本数。-1 表示使用所有样本。注意：大数值会产生非常大的HTML文件。")
     parser.add_argument(
         '--n_bins',
