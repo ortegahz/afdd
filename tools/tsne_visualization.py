@@ -10,6 +10,8 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from utils.macros import MIN_VAL_TH
+
 # -- 健壮的路径修正方案 --
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
@@ -17,7 +19,7 @@ if project_root not in sys.path:
 
 # 导入项目模块
 from cores.nets import NetAFDAE, NetAFDAE_Mem_Flow, NetAFDAE_UNet, NetAFDAE_Mem, NetAFDAE_UNet_Mem
-from cores.features_generator import FeaturesGeneratorCNN, HDF5SequentialSliceDataset
+from cores.features_generator import FeaturesGeneratorCNN, HDF5PeakAlignedDataset
 
 # -- 提早检查依赖库 --
 try:
@@ -166,7 +168,7 @@ def plot_tsne_3d(tsne_data, tsne_centers, labels, recon_errors, hard_norm_cluste
                 size=3,  # 稍微改小一点，避免完全遮挡
                 color='black',
                 symbol='circle',
-                opacity=0.6, # 稍微透明一点
+                opacity=0.6,  # 稍微透明一点
                 line=dict(width=0)
             ),
             text=[f'C{i}' for i in range(len(tsne_centers))],
@@ -300,11 +302,11 @@ def main():
 
     # --- 3. 准备数据集 ---
     features_generator = FeaturesGeneratorCNN()
-    dataset = HDF5SequentialSliceDataset(
+    dataset = HDF5PeakAlignedDataset(
         hdf5_file_path=args.data_path,
         transform=features_generator.transform_sample_ae,
         seq_len=features_generator.seq_len,
-        step=features_generator.seq_len // 8
+        min_delta=MIN_VAL_TH
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
     logging.info(f"已加载数据集，包含 {len(dataset)} 个样本。")
