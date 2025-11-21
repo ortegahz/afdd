@@ -1135,9 +1135,10 @@ class ArcDetector:
             else (np.max(self.db.db['rt'].seq_power) + np.min(self.db.db['rt'].seq_power)) / 2.
         self.db.db['rt'].seq_power_mean[-1] = self.power_mean
         _alarm_arc_cnt_th = 1.5
-        _min_val_th = self.indicator_max_val / 2 * 0.05  # MIN_VAL_TH * 2
+        _min_val_th = MIN_VAL_TH
         _th_raw = 2048 * 1.0
         _ini_peak_cnt_th = 64
+        self.peak_eval_win_size = self.af_win_size // 2  # 64 for 22k sample rate
         if self.alarm_idle_cnt > 0:
             self.db.db['rt'].seq_state_pred_arc[-1] = self.indicator_max_val
         if self.ini_peak_cnt < _ini_peak_cnt_th:
@@ -1172,27 +1173,31 @@ class ArcDetector:
                         [self.indicator_max_val * _alarm_indicate_scale] * self.af_win_size
             self.alarm_arc_idx_s, self.alarm_arc_idx_e = -1, -1
 
-        peak_idx = self.db.db['rt'].seq_len
-        _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
-        _peak_val = np.max(_seq_pick_power)  # Use max of window as peak value
+        # -------------------------------------------------------------
+        # Modified: Streaming Peak Detection Logic
+        # -------------------------------------------------------------
+        peak_idx_norm = self._detect_peak(power_pick, win_size=self.peak_eval_win_size,
+                                          peak_th=self.power_mean + _min_val_th)
+        # Map relative peak index to global sequence index
+        # If peak_idx_norm > 0, the peak is at the center of the eval window
+        peak_idx = self.db.db['rt'].seq_len - self.peak_eval_win_size // 2 if peak_idx_norm > 0 else -1
 
-        fixed_interval = 512
-        if (self.db.db['rt'].seq_len % fixed_interval != 0 or
-                np.max(_seq_pick_power) - np.min(_seq_pick_power) <= MIN_VAL_TH * 2):
+        if peak_idx < 0:
             # Not a trigger point, decay counters and return
             self.alarm_arc_cnt = self.alarm_arc_cnt - 0.0001 if self.alarm_arc_cnt > 0 else self.alarm_arc_cnt
             self.alarm_arc_cnt = self.alarm_arc_cnt + 0.0001 if self.alarm_arc_cnt < 0 else self.alarm_arc_cnt
             self.alarm_idle_cnt = self.alarm_idle_cnt - 0.0005 if self.alarm_idle_cnt > 0 else self.alarm_idle_cnt
-            self.peak_miss_cnt += 1  # Maintain idle detection logic
+            self.peak_miss_cnt += 1
             return
-
-        peak_idx -= 1
 
         # It's a trigger point, process the window
         self.ini_peak_cnt += 1
         self.peak_miss_cnt = 0  # Reset idle counter
         if self.ini_peak_cnt < 2:  # !
             return
+
+        _peak_val = self.db.db['rt'].seq_power[peak_idx]
+        _seq_pick_power = np.array(self.db.db['rt'].seq_power[peak_idx - self.af_win_size:peak_idx]).astype(float)
 
         _seq_pick = _seq_pick_power
         self.db.db['rt'].info_pred_peaks.append(peak_idx)
