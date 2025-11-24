@@ -121,7 +121,7 @@ class ClassifierCNN(ClassifierBase):
         _labels = labels.squeeze(1)
         pos_feats = feats[_labels == 1]
         neg_feats = feats[_labels == 0]
-        cos_loss = 0
+        cos_loss = torch.tensor(0.0).to(outputs.device)
         if len(pos_feats) > 0 and len(neg_feats) > 0:
             pos_feats = F.normalize(pos_feats, p=2, dim=1)
             neg_feats = F.normalize(neg_feats, p=2, dim=1)
