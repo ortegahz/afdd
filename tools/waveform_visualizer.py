@@ -36,7 +36,7 @@ def parse_args():
     parser.add_argument('--ae_model_type', type=str, default='ae',
                         choices=['ae', 'unet', 'mem-ae', 'unet-mem', 'mem-flow-ae'])
     parser.add_argument('--device', type=str, default="cuda:0")
-    parser.add_argument('--error_threshold', type=float, default=0.002)
+    parser.add_argument('--error_threshold', type=float, default=0.001)
     return parser.parse_args()
 
 
