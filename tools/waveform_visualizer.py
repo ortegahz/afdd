@@ -36,7 +36,7 @@ def parse_args():
     parser.add_argument('--ae_model_type', type=str, default='ae',
                         choices=['ae', 'unet', 'mem-ae', 'unet-mem', 'mem-flow-ae'])
     parser.add_argument('--device', type=str, default="cuda:0")
-    parser.add_argument('--error_threshold', type=float, default=0.003125)
+    parser.add_argument('--error_threshold', type=float, default=0.002)
     return parser.parse_args()
 
 
@@ -92,7 +92,7 @@ class SequenceLoader:
 
         # 1. 寻找合法对齐点 (逻辑同 HDF5PeakAlignedDataset)
         # peaks 是峰值的索引
-        peaks, _ = find_peaks(signal, distance=SEQ_LEN // 2, prominence=MIN_VAL_TH)
+        peaks, _ = find_peaks(signal, distance=SEQ_LEN // 2, prominence=MIN_VAL_TH * 2)
 
         valid_starts = []
         batch_inputs = []
