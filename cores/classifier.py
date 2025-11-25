@@ -451,7 +451,7 @@ class ClassifierCNNAE(ClassifierBase):
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 1)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
-        self.diversity_loss_weight = 0.
+        self.diversity_loss_weight = 2.0
         self.contrastive_loss_weight = getattr(args, 'contrastive_loss_weight', 0.0)
         if self.contrastive_loss_weight > 0 and self.training_phase == 1:
             logging.info(f"Contrastive learning enabled in phase 1 with weight: {self.contrastive_loss_weight}")
@@ -852,10 +852,10 @@ class ClassifierCNNAE(ClassifierBase):
         # We want to maximize the similarity to the *closest* (most similar) memory slot.
         if torch.any(normal_indices):
             sims_normal = sims[normal_indices]
-            # For each normal sample, find the similarity to its most similar memory slot.
-            max_sims_normal, _ = torch.max(sims_normal, dim=1)
-            # The loss is `1 - similarity`, pushing the similarity towards 1.
-            loss_normal = (1 - max_sims_normal).mean()
+            # For each normal sample, attract the Top-3 closest memory slots.
+            # This softens the assignment and helps activate more slots.
+            topk_sims_normal, _ = torch.topk(sims_normal, k=3, dim=1)
+            loss_normal = (1 - topk_sims_normal).mean()
 
         # 5. Calculate repulsive loss for abnormal samples
         # We want to minimize the similarity to the *closest* memory slot, ensuring it's at most `margin`.
@@ -869,34 +869,21 @@ class ClassifierCNNAE(ClassifierBase):
             zeros = torch.zeros_like(max_sims_abnormal)
             loss_abnormal = torch.max(zeros, max_sims_abnormal - margin).mean()
 
-        # 6. Combine losses and add diversity regularization
-        # The diversity loss helps prevent the memory slots from collapsing into a single point.
-        diversity_loss = self._diversity_loss()  # Assumes self._diversity_loss() is defined
-        total_loss = loss_normal + loss_abnormal + self.diversity_loss_weight * diversity_loss
+        # 6. [NEW] Slot Utilization Loss (Maximize Entropy of Mean Assignment)
+        # Replace geometric orthogonality with statistical uniformity.
+        # Encourages all slots to be used equally within a batch.
+        tau = 0.1
+        probs = F.softmax(sims / tau, dim=1)
+        avg_probs = torch.mean(probs, dim=0)
+        # Minimize sum(p * log(p)) forces distribution towards uniform (max entropy)
+        diversity_loss = torch.sum(avg_probs * torch.log(avg_probs + 1e-6))
+
+        total_loss = loss_normal + loss_abnormal + self.diversity_loss_weight * diversity_loss + 16
 
         return total_loss
 
     def _diversity_loss(self) -> torch.Tensor:
-        """
-        Calculates a diversity loss to encourage memory slots to be dissimilar.
-        This is done by penalizing the cosine similarity between memory vectors.
-        """
-        if not hasattr(self, 'memory_head'):
-            return torch.tensor(0.0).to(self.local_rank)
-
-        # Get the memory bank from the (potentially DDP-wrapped) memory_head
-        memory_bank = self.memory_head.module.memory if self.ddp and isinstance(self.memory_head,
-                                                                                DDP) else self.memory_head.memory
-
-        # Normalize memory vectors to unit length
-        mem_normalized = F.normalize(memory_bank, p=2, dim=1)
-
-        # Calculate the cosine similarity matrix (M * M^T)
-        cos_sim_matrix = torch.matmul(mem_normalized, mem_normalized.t())
-
-        # We want to minimize off-diagonal similarities. Subtract the identity matrix.
-        identity = torch.eye(cos_sim_matrix.size(0), device=cos_sim_matrix.device)
-        return torch.mean((cos_sim_matrix - identity) ** 2)
+        return torch.tensor(0.0).to(self.local_rank)
 
     def _train_phase1(self, data, loss_ckp=True):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
