@@ -53,7 +53,7 @@ def parse_args():
     parser.add_argument(
         '--model_path',
         type=str,
-        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best.pt",
+        default="/home/manu/mnt/8gpu_3090/afdd_models_mp_v11/ae_best.pt",
         help="预训练的AutoEncoder模型 (.pt 文件) 的路径。")
     parser.add_argument(
         '--data_path',
@@ -89,7 +89,7 @@ def parse_args():
     parser.add_argument(
         '--n_clusters',
         type=int,
-        default=256,
+        default=1024,
         help="对Hard Normal样本进行K-Means聚类的簇数量。")
     parser.add_argument(
         '--max_samples',
