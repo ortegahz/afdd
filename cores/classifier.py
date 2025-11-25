@@ -20,8 +20,8 @@ from torch.testing import assert_close
 from torch.utils.data import DataLoader, TensorDataset, Subset
 
 from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
-                                      HDF5Dataset, HDF5SequentialSliceDataset, HDF5SPDataset,
-                                      generate_augmented_samples, HDF5PeakAlignedDataset)
+                                      HDF5Dataset, HDF5SequentialSliceDataset, generate_augmented_samples,
+                                      HDF5PeakAlignedDataset)
 from cores.loss import HardExampleMiningFocalLoss
 from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_2D_MTF
 from utils.macros import MIN_VAL_TH
@@ -388,7 +388,7 @@ class MemoryHead(nn.Module):
     - V2: 增加了一个MLP来转换潜向量，以增加可学习参数和模型的表达能力。
     """
 
-    def __init__(self, latent_dim, mem_dim=512, hidden_dim=256, num_layers=8, initial_memory=None):
+    def __init__(self, latent_dim, mem_dim=512, hidden_dim=256, num_layers=4, initial_memory=None):
         super().__init__()
         # --- MLP for latent space transformation ---
         # 增加一个多层感知机 (MLP) 来转换输入特征 z, 增加模型的复杂度。
@@ -446,12 +446,12 @@ class ClassifierCNNAE(ClassifierBase):
             ddp (bool): Flag for distributed data parallel.
         """
         super().__init__()
-        self.num_epochs = 1024
+        self.num_epochs = 8192 * 2
         self.lr = 1e-4
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 1)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
-        self.diversity_loss_weight = 0.5
+        self.diversity_loss_weight = 0.
         self.contrastive_loss_weight = getattr(args, 'contrastive_loss_weight', 0.0)
         if self.contrastive_loss_weight > 0 and self.training_phase == 1:
             logging.info(f"Contrastive learning enabled in phase 1 with weight: {self.contrastive_loss_weight}")
@@ -540,30 +540,50 @@ class ClassifierCNNAE(ClassifierBase):
                         if not os.path.exists(train_data_path):
                             raise FileNotFoundError(f"Training data for K-Means not found: {train_data_path}")
 
-                        temp_dataset = HDF5SequentialSliceDataset(train_data_path,
-                                                                  self.transform_fn,
-                                                                  seq_len=self.features_generator.seq_len,
-                                                                  step=self.features_generator.seq_len,
-                                                                  only_normal=True)
-                        num_samples = min(20000, len(temp_dataset))
-                        indices = np.random.choice(len(temp_dataset), num_samples, replace=False)
-                        subset = Subset(temp_dataset, indices)
-                        temp_loader = DataLoader(dataset=subset, batch_size=2048, shuffle=False)
+                        temp_dataset = HDF5PeakAlignedDataset(
+                            train_data_path,
+                            self.transform_fn,
+                            seq_len=self.features_generator.seq_len,
+                            min_delta=MIN_VAL_TH,
+                            only_normal=True
+                        )
+                        temp_loader = DataLoader(dataset=temp_dataset, batch_size=2048, shuffle=False)
 
                         self.model.eval()
-                        all_latents = []
+                        all_latents, all_recon_errors = [], []
                         with torch.no_grad():
                             for inputs, _ in temp_loader:
-                                _, latents, _ = self.model(inputs.to(self.local_rank))
+                                inputs_cuda = inputs.to(self.local_rank)
+                                recons, latents, _ = self.model(inputs_cuda)
+                                errors = torch.mean((inputs_cuda - recons) ** 2,
+                                                    dim=tuple(range(1, inputs_cuda.dim()))).cpu()
                                 all_latents.append(latents.cpu().numpy())
+                                all_recon_errors.append(errors.numpy())
 
                         if all_latents:
                             all_latents_np = np.concatenate(all_latents, axis=0)
+                            all_recon_errors_np = np.concatenate(all_recon_errors, axis=0)
                             n_clusters = 512
-                            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10, max_iter=100)
-                            kmeans.fit(all_latents_np)
-                            initial_memory_centers = torch.from_numpy(kmeans.cluster_centers_).float()
-                            logging.info(f"Memory bank initialized with {n_clusters} K-Means cluster centers.")
+
+                            # Filter for hard normal samples based on reconstruction error
+                            error_threshold = 0.001  # Consistent with phase 2 logic
+                            hard_indices = np.where(all_recon_errors_np >= error_threshold)[0]
+
+                            if len(hard_indices) >= n_clusters:
+                                latents_for_kmeans = all_latents_np[hard_indices]
+                                logging.info(
+                                    f"Using {len(latents_for_kmeans)} hard normal samples (error > {error_threshold}) for K-Means.")
+                            else:
+                                logging.warning(
+                                    f"Found only {len(hard_indices)} hard samples, which is less than n_clusters ({n_clusters}). "
+                                    f"Falling back to using all {len(all_latents_np)} available normal samples.")
+                                latents_for_kmeans = all_latents_np
+
+                            if len(latents_for_kmeans) > 0:
+                                kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10, max_iter=100)
+                                kmeans.fit(latents_for_kmeans)
+                                initial_memory_centers = torch.from_numpy(kmeans.cluster_centers_).float()
+                                logging.info(f"Memory bank initialized with {n_clusters} K-Means cluster centers.")
                     except ImportError:
                         logging.warning("scikit-learn not found. Skipping K-Means. pip install scikit-learn.")
                     except Exception as e:
@@ -572,6 +592,12 @@ class ClassifierCNNAE(ClassifierBase):
                     obj_list = [initial_memory_centers] if self.rank == 0 else [None]
                     dist.broadcast_object_list(obj_list, src=0)
                     initial_memory_centers = obj_list[0]
+
+                self.memory_head = MemoryHead(
+                    latent_dim=latent_dim,
+                    mem_dim=512,
+                    initial_memory=initial_memory_centers
+                ).to(self.local_rank)
 
             # 4. 冻结基础AE并配置优化器
             self.model.eval()
@@ -641,72 +667,90 @@ class ClassifierCNNAE(ClassifierBase):
 
     def _train_phase2(self, data):
         """
-        第二阶段训练：冻结AE，仅训练MemoryHead，使用难例挖掘。
+        第二阶段训练：冻结AE，仅训练MemoryHead。
+        1. 挖掘所有重构误差大的样本（难例正常样本 + 异常样本）。
+        2. 使用对比损失训练MemoryHead，使难例正常样本靠近聚类中心，异常样本远离聚类中心。
         """
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
 
-        # --- 1. Hard Example Mining (on rank 0 only to avoid file contention and redundant work) ---
+        # --- 1. Hard Example Mining (on rank 0 only) ---
         hard_examples_tensor = None
+        hard_labels_tensor = None
         if self.rank == 0:
-            logging.info(f"Starting Phase 2: Hard Example Mining with threshold {self.hard_example_threshold}...")
+            logging.info(
+                f"Starting Phase 2: Hard Example Mining with threshold percentile {self.hard_example_threshold}...")
 
-            # Use the full, non-random dataset to calculate errors for all normal samples
-            full_dataset = HDF5SequentialSliceDataset(
+            # Use the full dataset to find hard examples from both normal and abnormal data
+            full_dataset = HDF5PeakAlignedDataset(
                 data['train_path'],
                 self.transform_fn,
                 seq_len=self.features_generator.seq_len,
-                step=self.features_generator.seq_len,  # no overlap
-                only_normal=True
+                min_delta=MIN_VAL_TH
             )
             full_loader = DataLoader(dataset=full_dataset, batch_size=2048, shuffle=False)
 
-            all_normal_inputs, all_recon_errors = [], []
+            all_inputs, all_labels, all_recon_errors = [], [], []
             self.model.eval()  # Ensure AE is in eval mode
             with torch.no_grad():
-                # Since the dataset is now pre-filtered to contain only normal samples,
-                # we can simplify the loop and directly use the inputs.
-                for inputs, _ in full_loader:
-                    inputs_normal = inputs.to(self.local_rank)
-                    recons, _, _ = self.model(inputs_normal)
+                for inputs, labels in full_loader:
+                    inputs_cuda = inputs.to(self.local_rank)
+                    recons, _, _ = self.model(inputs_cuda)
                     # Generic reconstruction error calculation for 1D and 2D
-                    errors = torch.mean((inputs_normal - recons) ** 2, dim=tuple(range(1, inputs_normal.dim()))).cpu()
+                    errors = torch.mean((inputs_cuda - recons) ** 2, dim=tuple(range(1, inputs_cuda.dim()))).cpu()
 
-                    all_normal_inputs.append(inputs_normal.cpu())
+                    all_inputs.append(inputs.cpu())
+                    all_labels.append(labels.cpu())
                     all_recon_errors.append(errors)
 
             if not all_recon_errors:
-                logging.error("No normal samples found for hard example mining.")
-                # Create a sentinel empty tensor
+                logging.error("No samples found for hard example mining.")
                 hard_examples_tensor = torch.empty(0)
+                hard_labels_tensor = torch.empty(0)
             else:
-                all_normal_inputs = torch.cat(all_normal_inputs, dim=0)
-                all_recon_errors_np = torch.cat(all_recon_errors, dim=0).numpy()
+                all_inputs = torch.cat(all_inputs, dim=0)
+                all_labels = torch.cat(all_labels, dim=0).view(-1)
+                all_recon_errors = torch.cat(all_recon_errors, dim=0).numpy()
 
-                error_threshold = np.percentile(all_recon_errors_np, self.hard_example_threshold * 100)
-                hard_indices = np.where(all_recon_errors_np >= error_threshold)[0]
-                hard_examples_tensor = all_normal_inputs[hard_indices]
+                # Find error threshold based on NORMAL samples only
+                normal_errors = all_recon_errors[all_labels == 0]
+                if len(normal_errors) == 0:
+                    logging.warning("No normal samples found to determine error threshold. Phase 2 cannot proceed.")
+                    error_threshold = np.inf  # Will select no normal samples
+                else:
+                    # error_threshold = np.percentile(normal_errors, self.hard_example_threshold * 100)
+                    error_threshold = 0.001
 
-                logging.info(f"Found {len(all_recon_errors_np)} normal samples. Recon error stats: "
-                             f"min={np.min(all_recon_errors_np):.6f}, max={np.max(all_recon_errors_np):.6f}, "
-                             f"mean={np.mean(all_recon_errors_np):.6f}.")
+                # Filter samples (both normal and abnormal) with reconstruction error > threshold
+                hard_indices = np.where(all_recon_errors >= error_threshold)[0]
+
+                hard_examples_tensor = all_inputs[hard_indices]
+                hard_labels_tensor = all_labels[hard_indices]
+
+                num_hard_normal = torch.sum(hard_labels_tensor == 0).item()
+                num_hard_abnormal = torch.sum(hard_labels_tensor == 1).item()
+
+                logging.info(f"Found {len(all_recon_errors)} total samples.")
+                if len(normal_errors) > 0:
+                    logging.info(
+                        f"Recon error stats (normal): min={np.min(normal_errors):.6f}, max={np.max(normal_errors):.6f}, mean={np.mean(normal_errors):.6f}.")
                 logging.info(
                     f"Error threshold at {self.hard_example_threshold * 100}th percentile is {error_threshold:.6f}. "
-                    f"Found {len(hard_examples_tensor)} hard examples for training.")
+                    f"Found {len(hard_examples_tensor)} hard examples for training ({num_hard_normal} normal, {num_hard_abnormal} abnormal).")
 
         if self.ddp:
-            # Broadcast the list containing the tensor from rank 0 to all other processes
-            obj_list = [hard_examples_tensor] if self.rank == 0 else [None]
+            # Broadcast tensors from rank 0 to all other processes
+            obj_list = [hard_examples_tensor, hard_labels_tensor] if self.rank == 0 else [None, None]
             dist.broadcast_object_list(obj_list, src=0)
-            hard_examples_tensor = obj_list[0]
+            hard_examples_tensor, hard_labels_tensor = obj_list
 
         if hard_examples_tensor is None or len(hard_examples_tensor) == 0:
             if self.rank == 0:
                 logging.warning("No hard examples found above the threshold. Phase 2 training cannot proceed.")
             return
 
-        # --- 2. Train MemoryHead ---
-        hard_dataset = TensorDataset(hard_examples_tensor)
+        # --- 2. Train MemoryHead with Contrastive Loss ---
+        hard_dataset = TensorDataset(hard_examples_tensor, hard_labels_tensor)
         is_distributed = self.ddp
         train_sampler = torch.utils.data.distributed.DistributedSampler(hard_dataset) if is_distributed else None
         loader = DataLoader(dataset=hard_dataset, batch_size=1024, shuffle=not is_distributed, sampler=train_sampler)
@@ -714,40 +758,40 @@ class ClassifierCNNAE(ClassifierBase):
         best_loss = float('inf')
         self.memory_head.train()
 
-        for epoch in range(self.num_epochs):  # Phase 2 usually requires fewer epochs
+        for epoch in range(self.num_epochs):
             epoch_start_time = time.time()
             if is_distributed:
                 train_sampler.set_epoch(epoch)
 
-            epoch_total_loss, epoch_entropy_loss, epoch_diversity_loss = 0.0, 0.0, 0.0
+            epoch_total_loss = 0.0
             num_batches = 0
-            for (inputs,) in loader:  # TensorDataset returns a tuple
+            for inputs, labels in loader:
                 inputs = inputs.to(self.local_rank)
+                labels = labels.to(self.local_rank)
 
                 with torch.no_grad():
-                    # The encode method returns a tuple, extract the latent tensor (second element)
                     _, latents, _ = self.model(inputs)
 
-                attention_weights = self.memory_head(latents)
+                # Handle DDP wrapping for memory head access
+                head_module = self.memory_head.module if is_distributed else self.memory_head
 
-                entropy_loss = self._entropy_loss(attention_weights)
-                diversity_loss = self._diversity_loss()
-                total_loss = entropy_loss + self.diversity_loss_weight * diversity_loss
+                # The memory head's MLP transforms the latent space
+                z_transformed = head_module.mlp(latents)
+                memory_bank = head_module.memory
+
+                # Calculate contrastive loss
+                total_loss = self._contrastive_cluster_loss(z_transformed, labels, memory_bank)
 
                 self.optimizer.zero_grad()
                 total_loss.backward()
                 self.optimizer.step()
 
                 epoch_total_loss += total_loss.item()
-                epoch_entropy_loss += entropy_loss.item()
-                epoch_diversity_loss += diversity_loss.item()
                 num_batches += 1
 
             self.scheduler.step()
 
             avg_epoch_total_loss = epoch_total_loss / num_batches if num_batches > 0 else 0
-            avg_epoch_entropy_loss = epoch_entropy_loss / num_batches if num_batches > 0 else 0
-            avg_epoch_diversity_loss = epoch_diversity_loss / num_batches if num_batches > 0 else 0
             epoch_duration = time.time() - epoch_start_time
 
             if self.rank == 0:
@@ -755,17 +799,14 @@ class ClassifierCNNAE(ClassifierBase):
                 logging.info(
                     f'Phase 2 - Epoch [{epoch + 1}/{self.num_epochs}], '
                     f'LR: {current_lr:.2e}, Time: {epoch_duration:.2f}s, '
-                    f'Loss: {avg_epoch_total_loss:.8f} (E: {avg_epoch_entropy_loss:.8f}, D: {avg_epoch_diversity_loss:.8f})'
+                    f'Loss: {avg_epoch_total_loss:.8f}'
                 )
 
                 if avg_epoch_total_loss < best_loss:
                     best_loss = avg_epoch_total_loss
-                    # In phase 2, we save both the memory_head and the base model
                     model_to_save = self.model.module if isinstance(self.model, DDP) else self.model
                     head_to_save = self.memory_head.module if is_distributed else self.memory_head
 
-                    # base_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_base.pt')
-                    # head_path = os.path.join(self.save_dir, f'phase2_best_e{epoch}_loss{best_loss:.4f}_head.pt')
                     base_path = os.path.join(self.save_dir, f'phase2_best_base.pt')
                     head_path = os.path.join(self.save_dir, f'phase2_best_head.pt')
 
@@ -773,6 +814,67 @@ class ClassifierCNNAE(ClassifierBase):
                     torch.save(head_to_save.state_dict(), head_path)
 
                     logging.info(f'Saved new best Phase 2 models with loss: {best_loss:.4f} to {head_path}')
+
+    def _contrastive_cluster_loss(self, z, labels, memory_bank, margin=0.5):
+        """
+        Calculates a contrastive loss using cosine similarity to train the memory head.
+        Input vectors and memory slots are L2-normalized for stable gradient computation.
+        - For normal samples (label 0), it maximizes the similarity to their nearest memory slot (attractive force).
+        - For abnormal samples (label 1), it pushes them away by enforcing a maximum similarity of `margin` (repulsive force).
+
+        Args:
+            z (torch.Tensor): Latent vectors from the MLP head. Shape: [batch_size, latent_dim].
+            labels (torch.Tensor): Sample labels. Shape: [batch_size].
+            memory_bank (torch.Tensor): The memory matrix. Shape: [mem_dim, latent_dim].
+            margin (float): The desired maximum similarity for abnormal samples to any memory slot.
+
+        Returns:
+            torch.Tensor: The computed scalar loss.
+        """
+        # 1. L2-normalize both the latent vectors and the memory bank for cosine similarity calculation.
+        z_norm = F.normalize(z, p=2, dim=1)
+        memory_bank_norm = F.normalize(memory_bank, p=2, dim=1)
+
+        # 2. Calculate the pairwise cosine similarity matrix.
+        # The result `sims` has a shape of [batch_size, mem_dim].
+        # sims[i, j] is the similarity between the i-th sample and the j-th memory slot.
+        sims = torch.matmul(z_norm, memory_bank_norm.t())
+
+        # 3. Separate samples based on their labels
+        labels_flat = labels.view(-1)
+        normal_indices = (labels_flat == 0)
+        abnormal_indices = (labels_flat == 1)
+
+        loss_normal = torch.tensor(0.0, device=z.device)
+        loss_abnormal = torch.tensor(0.0, device=z.device)
+
+        # 4. Calculate attractive loss for normal samples
+        # We want to maximize the similarity to the *closest* (most similar) memory slot.
+        if torch.any(normal_indices):
+            sims_normal = sims[normal_indices]
+            # For each normal sample, find the similarity to its most similar memory slot.
+            max_sims_normal, _ = torch.max(sims_normal, dim=1)
+            # The loss is `1 - similarity`, pushing the similarity towards 1.
+            loss_normal = (1 - max_sims_normal).mean()
+
+        # 5. Calculate repulsive loss for abnormal samples
+        # We want to minimize the similarity to the *closest* memory slot, ensuring it's at most `margin`.
+        if torch.any(abnormal_indices):
+            sims_abnormal = sims[abnormal_indices]
+            # For each abnormal sample, find its highest similarity to any memory slot.
+            max_sims_abnormal, _ = torch.max(sims_abnormal, dim=1)
+            # We penalize samples that are more similar than the margin.
+            # If max_sim < margin, loss is 0. Otherwise, loss is (max_sim - margin).
+            # This pushes the sample's representation away until its max similarity is below `margin`.
+            zeros = torch.zeros_like(max_sims_abnormal)
+            loss_abnormal = torch.max(zeros, max_sims_abnormal - margin).mean()
+
+        # 6. Combine losses and add diversity regularization
+        # The diversity loss helps prevent the memory slots from collapsing into a single point.
+        diversity_loss = self._diversity_loss()  # Assumes self._diversity_loss() is defined
+        total_loss = loss_normal + loss_abnormal + self.diversity_loss_weight * diversity_loss
+
+        return total_loss
 
     def _diversity_loss(self) -> torch.Tensor:
         """
@@ -891,8 +993,9 @@ class ClassifierCNNAE(ClassifierBase):
 
             if self.rank == 0:
                 current_lr = self.optimizer.param_groups[0]['lr']
-                log_msg = (f'Phase 1 - Epoch [{epoch + 1}/{self.num_epochs}]: LR: {current_lr:.2e}, Time: {epoch_duration:.2f}s, Val F1: {val_f1_score:.4f}, '
-                           f'Loss: {avg_epoch_loss:.6f} (Recon: {avg_recon_loss:.6f}, Contrastive: {avg_contrastive_loss:.6f})')
+                log_msg = (
+                    f'Phase 1 - Epoch [{epoch + 1}/{self.num_epochs}]: LR: {current_lr:.2e}, Time: {epoch_duration:.2f}s, Val F1: {val_f1_score:.4f}, '
+                    f'Loss: {avg_epoch_loss:.6f} (Recon: {avg_recon_loss:.6f}, Contrastive: {avg_contrastive_loss:.6f})')
                 logging.info(log_msg)
 
                 if val_f1_score > best_accuracy:
@@ -1022,13 +1125,28 @@ class ClassifierCNNAE(ClassifierBase):
                 if self.training_phase == 1:
                     reconstructions, *_ = model_to_eval(inputs)
                     # Generic reconstruction error calculation
-                    scores = torch.mean((inputs - reconstructions) ** 2, dim=tuple(range(1, inputs.dim()))).cpu().numpy()
+                    scores = torch.mean((inputs - reconstructions) ** 2,
+                                        dim=tuple(range(1, inputs.dim()))).cpu().numpy()
                 else:  # Phase 2
-                    latents = model_to_eval.encode(inputs)
-                    attention_weights = self.memory_head(latents)
-                    epsilon = 1e-12
-                    entropy = -attention_weights * torch.log(attention_weights + epsilon)
-                    scores = torch.sum(entropy, dim=1).cpu().numpy()
+                    # Get latent vectors from the frozen encoder. Using forward pass for robust API.
+                    _, latents, _ = model_to_eval(inputs)
+
+                    # Get the head and memory bank, handling DDP wrapper
+                    head_to_eval = self.memory_head.module if isinstance(self.memory_head, DDP) else self.memory_head
+                    memory_bank = head_to_eval.memory
+
+                    # Transform latents using the trained MLP head
+                    z_transformed = head_to_eval.mlp(latents)
+
+                    # Calculate distance-based anomaly score
+                    z_norm = F.normalize(z_transformed, p=2, dim=1)
+                    mem_norm = F.normalize(memory_bank, p=2, dim=1)
+                    cos_sim = F.linear(z_norm, mem_norm)
+                    max_sim, _ = torch.max(cos_sim, dim=1)
+
+                    # Anomaly score is 1 - max_similarity. Higher score for anomalies.
+                    scores = (1.0 - max_sim).cpu().numpy()
+
                     reconstructions, *_ = model_to_eval(inputs)  # For plotting only
 
                 # --- 新增：查找并绘制指定次序的样本 ---
@@ -1052,30 +1170,50 @@ class ClassifierCNNAE(ClassifierBase):
                                 score_for_sample = scores[idx_in_batch]
 
                                 fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-                                title = (f'MTF Reconstruction of {plot_target_ordinal + 1}-th {"Positive" if plot_target_label == 1 else "Negative"} Sample\n'
-                                         f'Score: {score_for_sample:.6f}')
+                                title = (
+                                    f'MTF Reconstruction of {plot_target_ordinal + 1}-th {"Positive" if plot_target_label == 1 else "Negative"} Sample\n'
+                                    f'Score: {score_for_sample:.6f}')
                                 fig.suptitle(title, fontsize=16)
 
-                                im1 = axs[0].imshow(original_image, cmap='rainbow', origin='lower'); axs[0].set_title('Original MTF'); fig.colorbar(im1, ax=axs[0])
-                                im2 = axs[1].imshow(reconstructed_image, cmap='rainbow', origin='lower'); axs[1].set_title('Reconstructed MTF'); fig.colorbar(im2, ax=axs[1])
+                                im1 = axs[0].imshow(original_image, cmap='rainbow', origin='lower');
+                                axs[0].set_title('Original MTF');
+                                fig.colorbar(im1, ax=axs[0])
+                                im2 = axs[1].imshow(reconstructed_image, cmap='rainbow', origin='lower');
+                                axs[1].set_title('Reconstructed MTF');
+                                fig.colorbar(im2, ax=axs[1])
                                 diff_image = np.abs(original_image - reconstructed_image)
-                                im3 = axs[2].imshow(diff_image, cmap='hot', origin='lower'); axs[2].set_title('Absolute Difference'); fig.colorbar(im3, ax=axs[2])
+                                im3 = axs[2].imshow(diff_image, cmap='hot', origin='lower');
+                                axs[2].set_title('Absolute Difference');
+                                fig.colorbar(im3, ax=axs[2])
                                 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
-                            else: # Original 1D signal plotting
+                            else:  # Original 1D signal plotting
                                 original_signal = inputs[idx_in_batch].cpu().numpy().flatten()
                                 reconstructed_signal = reconstructions[idx_in_batch].cpu().numpy().flatten()
                                 score_for_sample = scores[idx_in_batch]
 
                                 fig, axs = plt.subplots(3, 1, figsize=(15, 10), sharex=True)
-                                title = (f'Reconstruction of {plot_target_ordinal + 1}-th {"Positive" if plot_target_label == 1 else "Negative"} Sample\n'
-                                         f'MSE: {score_for_sample:.6f}') if self.training_phase == 1 else (
+                                title = (
+                                    f'Reconstruction of {plot_target_ordinal + 1}-th {"Positive" if plot_target_label == 1 else "Negative"} Sample\n'
+                                    f'MSE: {score_for_sample:.6f}') if self.training_phase == 1 else (
                                     f'Reconstruction with Entropy Score: {score_for_sample:.6f}')
                                 fig.suptitle(title, fontsize=16)
 
-                                axs[0].plot(original_signal, color='blue', label='Original'); axs[0].set_title('Original Signal'); axs[0].legend(loc='upper right'); axs[0].grid(True, linestyle='--', alpha=0.6)
-                                axs[1].plot(reconstructed_signal, color='orange', label='Reconstructed'); axs[1].set_title('Reconstructed Signal'); axs[1].legend(loc='upper right'); axs[1].grid(True, linestyle='--', alpha=0.6)
-                                axs[2].plot(original_signal, label='Original', color='blue', alpha=0.9); axs[2].plot(reconstructed_signal, label='Reconstructed', color='red', linestyle='--', alpha=0.8); axs[2].set_title('Overlay'); axs[2].set_xlabel('Time Step'); axs[2].legend(loc='upper right'); axs[2].grid(True, linestyle='--', alpha=0.6)
+                                axs[0].plot(original_signal, color='blue', label='Original');
+                                axs[0].set_title('Original Signal');
+                                axs[0].legend(loc='upper right');
+                                axs[0].grid(True, linestyle='--', alpha=0.6)
+                                axs[1].plot(reconstructed_signal, color='orange', label='Reconstructed');
+                                axs[1].set_title('Reconstructed Signal');
+                                axs[1].legend(loc='upper right');
+                                axs[1].grid(True, linestyle='--', alpha=0.6)
+                                axs[2].plot(original_signal, label='Original', color='blue', alpha=0.9);
+                                axs[2].plot(reconstructed_signal, label='Reconstructed', color='red', linestyle='--',
+                                            alpha=0.8);
+                                axs[2].set_title('Overlay');
+                                axs[2].set_xlabel('Time Step');
+                                axs[2].legend(loc='upper right');
+                                axs[2].grid(True, linestyle='--', alpha=0.6)
                                 plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
                             if _save_dir:
@@ -1084,9 +1222,10 @@ class ClassifierCNNAE(ClassifierBase):
                                 plt.savefig(plot_path)
                                 logging.info(f"Saved reconstruction plot to '{plot_path}'")
                             else:
-                                logging.warning("Save directory (--save_dir) not specified, cannot save reconstruction plot.")
+                                logging.warning(
+                                    "Save directory (--save_dir) not specified, cannot save reconstruction plot.")
 
-                            plt.close(fig) # Always close figure to free memory
+                            plt.close(fig)  # Always close figure to free memory
                             plotted = True
                         except ImportError:
                             logging.warning(

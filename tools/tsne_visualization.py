@@ -89,7 +89,7 @@ def parse_args():
     parser.add_argument(
         '--n_clusters',
         type=int,
-        default=24,
+        default=256,
         help="对Hard Normal样本进行K-Means聚类的簇数量。")
     parser.add_argument(
         '--max_samples',
@@ -99,7 +99,7 @@ def parse_args():
     parser.add_argument(
         '--error_threshold',
         type=float,
-        default=0.003125,
+        default=0.001,
         help="重构误差阈值，用于高亮显示'难重构'的正常样本。")
     parser.add_argument(
         '--show_plot',

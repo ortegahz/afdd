@@ -560,7 +560,7 @@ class HDF5PeakAlignedDataset(torch.utils.data.Dataset):
     Samples are generated such that the peak is aligned at the very end of the sequence.
     """
 
-    def __init__(self, hdf5_file_path, transform, seq_len, min_delta=MIN_VAL_TH):
+    def __init__(self, hdf5_file_path, transform, seq_len, min_delta=MIN_VAL_TH, only_normal=False):
         self.hdf5_file_path = hdf5_file_path
         self.transform = transform
         self.seq_len = seq_len
@@ -579,6 +579,14 @@ class HDF5PeakAlignedDataset(torch.utils.data.Dataset):
                     # Ensure we have enough history to place the peak at the end
                     # The slice will be [p - seq_len + 1 : p + 1]
                     if p >= self.seq_len - 1:
+                        start_idx = p - self.seq_len + 1
+                        end_idx = p + 1
+
+                        # If only_normal is requested, check the label of the slice
+                        if only_normal:
+                            label_slice = f[key]['label_seq'][start_idx:end_idx]
+                            if np.any(label_slice > 0):
+                                continue  # This is an abnormal sample, skip it
                         # Store the index (p + 1) which is the exclusive end index for slicing
                         self.samples.append((key, p + 1))
 
