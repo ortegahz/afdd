@@ -109,7 +109,7 @@ def parse_args():
 
 
 def plot_phase2_tsne(tsne_data, num_memory_slots, labels, recon_errors,
-                     output_path, title='Phase 2 Latent Space (MLP + Normalized)', show_plot=False):
+                     output_path, title='Phase 2 Feature Space (After Residual MLP)', show_plot=False):
     """
     绘制 Phase 2 特征。
     tsne_data: 包含了 [样本特征; Memory Slots] 的t-SNE结果
@@ -232,8 +232,12 @@ def main():
     logging.info(f"Detected Latent Dim: {latent_dim}")
 
     # --- 2. 加载 Memory Head ---
-    # Phase 2 默认 mem_dim=512，如修改过需同步
-    memory_head = MemoryHead(latent_dim=latent_dim, mem_dim=512)
+    # 必须确保这里的参数与训练时使用的参数完全一致
+    memory_head = MemoryHead(
+        latent_dim=latent_dim,
+        mem_dim=1024,
+        hidden_dim=latent_dim  # <--- 修正：与训练脚本保持一致
+    )
 
     state_dict_head = torch.load(args.path_ckpt_head, map_location=device)
     # 处理 DDP keys
@@ -263,7 +267,7 @@ def main():
     recon_errors_list = []
 
     total_samples = 0
-    logging.info("开始提取特征 (Base -> MLP -> Normalize)...")
+    logging.info("开始提取特征 (Base -> Latent -> Residual MLP)...")
 
     with torch.no_grad():
         for inputs, labels in tqdm(loader):
@@ -279,13 +283,9 @@ def main():
             # 计算一下重构误差备用
             errs = torch.mean((inputs - recons) ** 2, dim=tuple(range(1, inputs.dim())))
 
-            # 2. Memory Head MLP: latent -> z
-            z = memory_head.mlp(latents)
-
-            # 3. Normalize: z -> z_norm (Phase 2 的特征空间)
-            z_norm = F.normalize(z, p=2, dim=1)
-
-            z_features_list.append(z_norm.cpu())
+            # 2. Apply the trained Memory Head (Residual MLP) to get the final features
+            z = memory_head(latents)
+            z_features_list.append(z.cpu())
             labels_list.append(labels.cpu())
             recon_errors_list.append(errs.cpu())
 
@@ -316,17 +316,15 @@ def main():
 
     z_features_np = z_features.numpy()
 
-    # --- 5. 获取 Memory Slots 并归一化 ---
+    # --- 5. 获取 Memory Slots (K-Means 中心点, 不归一化) ---
     mem_matrix = memory_head.memory.detach().cpu()  # Shape: [mem_dim, latent_dim]
-    # Memory Head 内部计算相似度时是对 memory 也做了 normalize 的
-    mem_matrix_norm = F.normalize(mem_matrix, p=2, dim=1).numpy()
+    mem_matrix_np = mem_matrix.numpy()
 
-    num_slots = mem_matrix_norm.shape[0]
+    num_slots = mem_matrix_np.shape[0]
     logging.info(f"Memory Slots 数量: {num_slots}, 样本特征数量: {len(z_features_np)}")
 
-    # --- 6. 拼接数据进行 t-SNE ---
-    # 我们希望 Memory Slots 和 Samples 在同一空间展示
-    tsne_input = np.vstack([z_features_np, mem_matrix_norm])
+    # --- 6. 拼接映射后的样本特征和 K-Means 中心点进行 t-SNE ---
+    tsne_input = np.vstack([z_features_np, mem_matrix_np])
 
     logging.info(f"开始 t-SNE (Total points: {tsne_input.shape[0]})...")
     tsne = TSNE(
@@ -340,8 +338,9 @@ def main():
     tsne_result = tsne.fit_transform(tsne_input)
 
     # --- 7. 绘图 ---
-    plot_phase2_tsne(tsne_result, num_slots, all_labels, all_errors,
-                     args.output_file, show_plot=args.show_plot)
+    # plot_phase2_tsne(tsne_result, num_slots, all_labels, all_errors, args.output_file,
+    #                  args.output_file, show_plot=args.show_plot)
+    plot_phase2_tsne(tsne_result, num_slots, all_labels, all_errors, args.output_file, show_plot=args.show_plot)
 
 
 if __name__ == '__main__':

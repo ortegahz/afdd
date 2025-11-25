@@ -17,10 +17,10 @@ from torch.ao.quantization.quantize_fx import fuse_fx, prepare_qat_fx, convert_f
 from torch.nn import functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing import assert_close
-from torch.utils.data import DataLoader, TensorDataset, Subset
+from torch.utils.data import DataLoader, TensorDataset
 
 from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
-                                      HDF5Dataset, HDF5SequentialSliceDataset, generate_augmented_samples,
+                                      HDF5Dataset, generate_augmented_samples,
                                       HDF5PeakAlignedDataset)
 from cores.loss import HardExampleMiningFocalLoss
 from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_2D_MTF
@@ -381,58 +381,65 @@ class WeightedReconstructionLoss(nn.Module):
         return weighted_loss.mean()
 
 
+class ResidualBlock(nn.Module):
+    """一个简单的残差块，用于MLP中"""
+
+    def __init__(self, latent_dim, hidden_dim):
+        super(ResidualBlock, self).__init__()
+        self.fc1 = nn.Linear(latent_dim, hidden_dim)
+        self.bn1 = nn.BatchNorm1d(hidden_dim)
+        self.relu = nn.ReLU(inplace=True)
+        self.fc2 = nn.Linear(hidden_dim, latent_dim)
+
+    def forward(self, x):
+        out = self.fc1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.fc2(out)
+        return out
+
+
 class MemoryHead(nn.Module):
     """
-    一个独立的记忆头，作用于已经提取的latent space上。
-    设计用于在冻结的encoder之上进行训练。
-    - V2: 增加了一个MLP来转换潜向量，以增加可学习参数和模型的表达能力。
+    Memory Head模块。包含一个残差MLP，将latent vector映射到新的特征空间，
+    以及一个固定的Memory Bank。
+    MLP被初始化为恒等映射，以提供一个稳定的训练起点。
     """
 
-    def __init__(self, latent_dim, mem_dim=512, hidden_dim=256, num_layers=4, initial_memory=None):
+    def __init__(self, latent_dim, mem_dim=1024, hidden_dim=512, initial_memory=None):
         super().__init__()
-        # --- MLP for latent space transformation ---
-        # 增加一个多层感知机 (MLP) 来转换输入特征 z, 增加模型的复杂度。
-        # 这为 Phase 2 训练提供了更多可学习的参数。
-        layers = []
-        input_d = latent_dim
-        # 创建一个包含 `num_layers` 个隐藏层的MLP
-        for _ in range(num_layers):
-            layers.append(nn.Linear(input_d, hidden_dim))
-            # 使用 BatchNorm1d 稳定训练
-            layers.append(nn.BatchNorm1d(hidden_dim))
-            layers.append(nn.ReLU(inplace=True))
-            input_d = hidden_dim
+        # 1. 定义残差块作为MLP
+        self.residual_block = ResidualBlock(latent_dim, hidden_dim)
 
-        # 最后一层将特征投影回原始的 latent_dim，以便与 memory bank 进行交互
-        layers.append(nn.Linear(input_d, latent_dim))
-        self.mlp = nn.Sequential(*layers)
+        # --- 特殊初始化 ---
+        # 将残差块的最后一个线性层权重和偏置初始化为0
+        # 这样在训练开始时，forward pass的结果是 identity + 0 = identity
+        nn.init.constant_(self.residual_block.fc2.weight, 0)
+        nn.init.constant_(self.residual_block.fc2.bias, 0)
+        logging.info("Residual block's last layer initialized to zero for identity mapping at start.")
 
-        # --- Memory Matrix (as before) ---
+        # 2. 初始化memory bank (槽)
         if initial_memory is not None:
             if initial_memory.shape != (mem_dim, latent_dim):
                 raise ValueError(
                     f"Shape of initial_memory {initial_memory.shape} does not match expected shape {(mem_dim, latent_dim)}")
-            self.memory = nn.Parameter(initial_memory)
+            # === 根据您的要求修改 ===
+            # 将 memory Aots 注册为 buffer 而不是 Parameter，使其在训练中固定不变。
+            self.register_buffer('memory', initial_memory)
             logging.info("Initialized memory head with provided initial memory (e.g., from K-Means).")
+            logging.warning("Memory slots are now FROZEN and will not be trained.")
         else:
-            self.memory = nn.Parameter(torch.randn(mem_dim, latent_dim))
-            nn.init.kaiming_uniform_(self.memory)  # 使用较好的初始化
+            initial_memory = torch.randn(mem_dim, latent_dim)
+            nn.init.kaiming_uniform_(initial_memory)  # 使用较好的初始化
+            self.register_buffer('memory', initial_memory)
+            logging.warning("Memory slots are randomly initialized and FROZEN.")
 
-    def forward(self, z):
+    def forward(self, x):
         """
-        z: latent vector, shape [batch_size, latent_dim]
+        前向传播。输入latent vector，输出经过残差映射后的新特征。
         """
-        # 1. 将潜向量 z 通过 MLP 进行转换
-        z_transformed = self.mlp(z)
-
-        # 2. 使用转换后的向量 z_transformed 来查询记忆库
-        # 使用归一化的点积（余弦相似度）计算注意力
-        # 这比简单的矩阵乘法更稳定
-        attention = F.linear(F.normalize(z_transformed, dim=1), F.normalize(self.memory, dim=1))
-        # attention_weights = F.softmax(attention, dim=1)
-        attention_weights = F.softmax(attention / 1.0, dim=1)
-
-        return attention_weights
+        # 应用残差连接: output = input + Block(input)
+        return x + self.residual_block(x)
 
 
 class ClassifierCNNAE(ClassifierBase):
@@ -446,12 +453,12 @@ class ClassifierCNNAE(ClassifierBase):
             ddp (bool): Flag for distributed data parallel.
         """
         super().__init__()
-        self.num_epochs = 8192 * 2
+        self.num_epochs = 8192
         self.lr = 1e-4
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 1)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
-        self.diversity_loss_weight = 2.0
+        self.diversity_loss_weight = 0.0
         self.contrastive_loss_weight = getattr(args, 'contrastive_loss_weight', 0.0)
         if self.contrastive_loss_weight > 0 and self.training_phase == 1:
             logging.info(f"Contrastive learning enabled in phase 1 with weight: {self.contrastive_loss_weight}")
@@ -504,7 +511,8 @@ class ClassifierCNNAE(ClassifierBase):
             self.model = NetAFDAE().to(self.local_rank) if base_model_type == 'ae' else NetAFDAE_UNet().to(
                 self.local_rank)
             latent_dim = self.model.get_latent_dim()
-            self.memory_head = MemoryHead(latent_dim=latent_dim, mem_dim=512).to(self.local_rank)
+            n_clusters = 1024
+            self.memory_head = MemoryHead(latent_dim=latent_dim, mem_dim=n_clusters, hidden_dim=latent_dim).to(self.local_rank)
 
             # 2. 智能判断和分配检查点路径
             ckpt_path = args.path_ckpt
@@ -526,7 +534,7 @@ class ClassifierCNNAE(ClassifierBase):
 
             latent_dim = self.model.get_latent_dim()
             if head_ckpt_path and os.path.exists(head_ckpt_path):
-                self.memory_head = MemoryHead(latent_dim=latent_dim, mem_dim=512).to(self.local_rank)
+                self.memory_head = MemoryHead(latent_dim=latent_dim, mem_dim=n_clusters, hidden_dim=latent_dim).to(self.local_rank)
                 self._load_checkpoint_v0(head_ckpt_path, model=self.memory_head, strict=True)
                 logging.info(f"Resuming phase 2 with loaded memory head from: {head_ckpt_path}")
             else:
@@ -563,7 +571,6 @@ class ClassifierCNNAE(ClassifierBase):
                         if all_latents:
                             all_latents_np = np.concatenate(all_latents, axis=0)
                             all_recon_errors_np = np.concatenate(all_recon_errors, axis=0)
-                            n_clusters = 512
 
                             # Filter for hard normal samples based on reconstruction error
                             error_threshold = 0.001  # Consistent with phase 2 logic
@@ -595,7 +602,8 @@ class ClassifierCNNAE(ClassifierBase):
 
                 self.memory_head = MemoryHead(
                     latent_dim=latent_dim,
-                    mem_dim=512,
+                    mem_dim=n_clusters,
+                    hidden_dim=latent_dim,
                     initial_memory=initial_memory_centers
                 ).to(self.local_rank)
 
@@ -775,8 +783,8 @@ class ClassifierCNNAE(ClassifierBase):
                 # Handle DDP wrapping for memory head access
                 head_module = self.memory_head.module if is_distributed else self.memory_head
 
-                # The memory head's MLP transforms the latent space
-                z_transformed = head_module.mlp(latents)
+                # The memory head's forward pass transforms the latent space
+                z_transformed = head_module(latents)
                 memory_bank = head_module.memory
 
                 # Calculate contrastive loss
@@ -815,32 +823,32 @@ class ClassifierCNNAE(ClassifierBase):
 
                     logging.info(f'Saved new best Phase 2 models with loss: {best_loss:.4f} to {head_path}')
 
-    def _contrastive_cluster_loss(self, z, labels, memory_bank, margin=0.5):
+    def _contrastive_cluster_loss(self, z, labels, memory_bank, margin=1.0):
         """
-        Calculates a contrastive loss using cosine similarity to train the memory head.
-        Input vectors and memory slots are L2-normalized for stable gradient computation.
-        - For normal samples (label 0), it maximizes the similarity to their nearest memory slot (attractive force).
-        - For abnormal samples (label 1), it pushes them away by enforcing a maximum similarity of `margin` (repulsive force).
+        Calculates a contrastive loss using Euclidean distance, which is more suitable
+        when memory slots are initialized from unnormalized K-Means centroids.
+
+        - For normal samples (label 0), it minimizes the distance to their nearest memory slots (attractive force).
+        - For abnormal samples (label 1), it pushes them away by enforcing a minimum distance of `margin` (repulsive force).
 
         Args:
             z (torch.Tensor): Latent vectors from the MLP head. Shape: [batch_size, latent_dim].
             labels (torch.Tensor): Sample labels. Shape: [batch_size].
-            memory_bank (torch.Tensor): The memory matrix. Shape: [mem_dim, latent_dim].
-            margin (float): The desired maximum similarity for abnormal samples to any memory slot.
+            memory_bank (torch.Tensor): The memory matrix (unnormalized). Shape: [mem_dim, latent_dim].
+            margin (float): The desired minimum distance for abnormal samples to any memory slot.
 
         Returns:
             torch.Tensor: The computed scalar loss.
         """
-        # 1. L2-normalize both the latent vectors and the memory bank for cosine similarity calculation.
-        z_norm = F.normalize(z, p=2, dim=1)
-        memory_bank_norm = F.normalize(memory_bank, p=2, dim=1)
+        # 1. Calculate pairwise squared Euclidean distances.
+        # This is more efficient than calculating the sqrt for all pairs upfront.
+        # ||a - b||^2 = ||a||^2 - 2a^T b + ||b||^2
+        z_sq = torch.sum(z.pow(2), dim=1, keepdim=True)
+        mem_sq = torch.sum(memory_bank.pow(2), dim=1, keepdim=True)
+        dists_sq = z_sq - 2 * torch.matmul(z, memory_bank.t()) + mem_sq.t()
+        dists_sq = F.relu(dists_sq)  # Prevent negative values from floating point inaccuracies
 
-        # 2. Calculate the pairwise cosine similarity matrix.
-        # The result `sims` has a shape of [batch_size, mem_dim].
-        # sims[i, j] is the similarity between the i-th sample and the j-th memory slot.
-        sims = torch.matmul(z_norm, memory_bank_norm.t())
-
-        # 3. Separate samples based on their labels
+        # 2. Separate samples based on their labels
         labels_flat = labels.view(-1)
         normal_indices = (labels_flat == 0)
         abnormal_indices = (labels_flat == 1)
@@ -848,37 +856,37 @@ class ClassifierCNNAE(ClassifierBase):
         loss_normal = torch.tensor(0.0, device=z.device)
         loss_abnormal = torch.tensor(0.0, device=z.device)
 
-        # 4. Calculate attractive loss for normal samples
-        # We want to maximize the similarity to the *closest* (most similar) memory slot.
+        # 3. Calculate attractive loss for normal samples
+        # We want to minimize the distance to the *closest* memory slots.
         if torch.any(normal_indices):
-            sims_normal = sims[normal_indices]
-            # For each normal sample, attract the Top-3 closest memory slots.
-            # This softens the assignment and helps activate more slots.
-            topk_sims_normal, _ = torch.topk(sims_normal, k=3, dim=1)
-            loss_normal = (1 - topk_sims_normal).mean()
+            dists_sq_normal = dists_sq[normal_indices]
+            # For each normal sample, attract the Top-3 closest memory slots (smallest distances).
+            # This softens the assignment and helps learning.
+            topk_dists_sq_normal, _ = torch.topk(dists_sq_normal, k=1, dim=1, largest=False)
+            loss_normal = topk_dists_sq_normal.mean()
 
-        # 5. Calculate repulsive loss for abnormal samples
-        # We want to minimize the similarity to the *closest* memory slot, ensuring it's at most `margin`.
+        # 4. Calculate repulsive loss for abnormal samples
+        # We want to maximize the distance to the *closest* memory slot, ensuring it's at least `margin`.
         if torch.any(abnormal_indices):
-            sims_abnormal = sims[abnormal_indices]
-            # For each abnormal sample, find its highest similarity to any memory slot.
-            max_sims_abnormal, _ = torch.max(sims_abnormal, dim=1)
-            # We penalize samples that are more similar than the margin.
-            # If max_sim < margin, loss is 0. Otherwise, loss is (max_sim - margin).
-            # This pushes the sample's representation away until its max similarity is below `margin`.
-            zeros = torch.zeros_like(max_sims_abnormal)
-            loss_abnormal = torch.max(zeros, max_sims_abnormal - margin).mean()
+            dists_sq_abnormal = dists_sq[abnormal_indices]
+            # For each abnormal sample, find its smallest squared distance to any memory slot.
+            min_dists_sq_abnormal, _ = torch.min(dists_sq_abnormal, dim=1)
+            # We penalize samples that are closer than the margin.
+            # Using squared margin to avoid sqrt. If min_dist^2 < margin^2, loss is positive.
+            zeros = torch.zeros_like(min_dists_sq_abnormal)
+            loss_abnormal = torch.max(zeros, margin ** 2 - min_dists_sq_abnormal).mean()
 
-        # 6. [NEW] Slot Utilization Loss (Maximize Entropy of Mean Assignment)
-        # Replace geometric orthogonality with statistical uniformity.
-        # Encourages all slots to be used equally within a batch.
-        tau = 0.1
-        probs = F.softmax(sims / tau, dim=1)
+        # 5. Slot Utilization Loss (Maximize Entropy of Mean Assignment)
+        # We use the negative squared distance as a similarity measure to create a probability distribution.
+        tau = 0.1  # Temperature parameter
+        pseudo_sims = -dists_sq / tau
+        probs = F.softmax(pseudo_sims, dim=1)
         avg_probs = torch.mean(probs, dim=0)
-        # Minimize sum(p * log(p)) forces distribution towards uniform (max entropy)
+        # Minimize sum(p * log(p)) which is equivalent to maximizing entropy, forcing a uniform distribution.
         diversity_loss = torch.sum(avg_probs * torch.log(avg_probs + 1e-6))
 
-        total_loss = loss_normal + loss_abnormal + self.diversity_loss_weight * diversity_loss + 16
+        # 6. Combine losses
+        total_loss = loss_normal + loss_abnormal + self.diversity_loss_weight * diversity_loss
 
         return total_loss
 
@@ -1122,8 +1130,8 @@ class ClassifierCNNAE(ClassifierBase):
                     head_to_eval = self.memory_head.module if isinstance(self.memory_head, DDP) else self.memory_head
                     memory_bank = head_to_eval.memory
 
-                    # Transform latents using the trained MLP head
-                    z_transformed = head_to_eval.mlp(latents)
+                    # Transform latents using the trained Memory head
+                    z_transformed = head_to_eval(latents)
 
                     # Calculate distance-based anomaly score
                     z_norm = F.normalize(z_transformed, p=2, dim=1)
