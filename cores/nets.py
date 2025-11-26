@@ -682,6 +682,67 @@ class NetAFDAE_2D_MTF(nn.Module):
         return self.latent_dim
 
 
+class NetAFDAE_2D_CWT(nn.Module):
+    """
+    2D CNN AutoEncoder for reconstructing CWT scalograms.
+    Input Shape: (B, 1, 64, 448)  [Scales x Time]
+    """
+    def __init__(self, latent_dim=128):
+        super().__init__()
+        self.latent_dim = latent_dim
+
+        # --- Encoder ---
+        # Input: 1 x 64 x 448
+        self.enc1 = CBR2D(1, 16, s=(2, 2), p=1)   # -> 16 x 32 x 224
+        self.enc2 = CBR2D(16, 32, s=(2, 2), p=1)  # -> 32 x 16 x 112
+        self.enc3 = CBR2D(32, 64, s=(2, 2), p=1)  # -> 64 x 8 x 56
+        self.enc4 = CBR2D(64, 128, s=(2, 2), p=1) # -> 128 x 4 x 28
+
+        # Flatten: 128 * 4 * 28 = 14336
+        self.fc_enc = nn.Linear(128 * 4 * 28, latent_dim)
+
+        # --- Decoder ---
+        self.fc_dec = nn.Linear(latent_dim, 128 * 4 * 28)
+        self.unflatten = lambda x: x.view(-1, 128, 4, 28)
+
+        # Note: output_padding (op) needs to be carefully set to match dimensions
+        # 4 -> 8 (s=2), 28 -> 56 (s=2)
+        self.dec4 = DeCBR2D(128, 64, s=(2, 2), p=1, op=(1, 1)) # -> 64 x 8 x 56
+
+        # 8 -> 16, 56 -> 112
+        self.dec3 = DeCBR2D(64, 32, s=(2, 2), p=1, op=(1, 1))  # -> 32 x 16 x 112
+
+        # 16 -> 32, 112 -> 224
+        self.dec2 = DeCBR2D(32, 16, s=(2, 2), p=1, op=(1, 1))  # -> 16 x 32 x 224
+
+        # 32 -> 64, 224 -> 448
+        self.dec1 = DeCBR2D(16, 16, s=(2, 2), p=1, op=(1, 1))  # -> 16 x 64 x 448
+
+        self.out_conv = nn.Conv2d(16, 1, kernel_size=3, padding=1)
+
+    def encode(self, x):
+        x = self.enc1(x)
+        x = self.enc2(x)
+        x = self.enc3(x)
+        x = self.enc4(x)
+        x = x.flatten(1)
+        return self.fc_enc(x)
+
+    def decode(self, z):
+        x = F.relu(self.fc_dec(z))
+        x = self.unflatten(x)
+        x = self.dec4(x)
+        x = self.dec3(x)
+        x = self.dec2(x)
+        x = self.dec1(x)
+        # Output is CWT magnitude, usually positive
+        return F.relu(self.out_conv(x))
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, None]:
+        z = self.encode(x)
+        recon = self.decode(z)
+        return recon, z, None
+
 import torch.nn as nn
 
 

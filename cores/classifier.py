@@ -6,6 +6,7 @@ import time
 
 import numpy as np
 import onnxruntime as ort
+import pywt
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -23,7 +24,7 @@ from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN
                                       HDF5Dataset, generate_augmented_samples,
                                       HDF5PeakAlignedDataset)
 from cores.loss import HardExampleMiningFocalLoss
-from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_2D_MTF
+from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_2D_MTF, NetAFDAE_2D_CWT
 from utils.macros import MIN_VAL_TH
 from utils.utils import make_dirs
 
@@ -446,14 +447,15 @@ class ClassifierCNNAE(ClassifierBase):
     def __init__(self, args, ddp=False):
         """
         Initializes the AutoEncoder-based classifier.
-
+        Arg `training_phase`:
+           1=Base Recon, 2=Memory Head, 3=Residual CWT Refinement
         Args:
             args: Command line arguments, should include `ae_model_type`
                   to select between 'unet' and 'mem-ae'.
             ddp (bool): Flag for distributed data parallel.
         """
         super().__init__()
-        self.num_epochs = 8192
+        self.num_epochs = 512
         self.lr = 1e-4
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 1)
@@ -469,6 +471,7 @@ class ClassifierCNNAE(ClassifierBase):
         make_dirs(args.save_dir, reset=True)
 
         # Choose the appropriate transformation function based on the model type
+        # Note: Phase 3 uses the Base AE for initial residual, so it uses the standard transform
         if self.ae_model_type == '2d-cnn-ae-mtf':
             self.transform_fn = self.features_generator.transform_sample_ae_mtf
         else:
@@ -495,13 +498,14 @@ class ClassifierCNNAE(ClassifierBase):
             if self.training_phase == 1:
                 model = NetAFDAE().to(self.local_rank) if self.ae_model_type == 'ae' else NetAFDAE_UNet().to(
                     self.local_rank)
-        else:
+
+        elif self.training_phase == 2:
             raise ValueError(f"Unsupported AE model type: {self.ae_model_type}")
 
         if self.training_phase == 1:
             self.model = model
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
-        else:
+        elif self.training_phase == 2:
             # 在阶段2，我们加载基础AE，冻结它，并只训练MemoryHead
             if args.path_ckpt is None:
                 raise ValueError("Phase 2 training requires a checkpoint from Phase 1 via --path_ckpt.")
@@ -614,6 +618,45 @@ class ClassifierCNNAE(ClassifierBase):
             logging.info("Froze base AE model parameters.")
             self.optimizer = optim.Adam(self.memory_head.parameters(), lr=self.lr)
 
+        elif self.training_phase == 3:
+            # Phase 3: Residual CWT Reconstruction
+            # 1. Load Phase 1 Model (Frozen)
+            if args.path_ckpt is None:
+                raise ValueError("Phase 3 training requires a checkpoint from Phase 1 via --path_ckpt.")
+
+            base_model_type = 'ae' if 'unet' not in self.ae_model_type else 'unet'
+            self.model = NetAFDAE().to(self.local_rank) if base_model_type == 'ae' else NetAFDAE_UNet().to(self.local_rank)
+
+            # Check if using MemoryAE from Phase 2
+            if 'mem' in self.ae_model_type:
+                self.use_mem_ae = True
+                latent_dim = self.model.get_latent_dim()
+                self.memory_head = MemoryHead(latent_dim=latent_dim, mem_dim=1024, hidden_dim=latent_dim).to(self.local_rank)
+
+                # Smart loading for Phase 2 components
+                base_pt = args.path_ckpt if "_base.pt" not in args.path_ckpt else args.path_ckpt
+                if "_head.pt" in args.path_ckpt: base_pt = args.path_ckpt.replace("_head.pt", "_base.pt")
+                head_pt = base_pt.replace("_base.pt", "_head.pt") if "_base.pt" in base_pt else args.path_ckpt.replace(".pt", "_head.pt")
+
+                if os.path.exists(head_pt):
+                    self._load_checkpoint_v0(head_pt, model=self.memory_head, strict=True)
+                    self.memory_head.eval()
+                    for p in self.memory_head.parameters(): p.requires_grad = False
+                    logging.info(f"Loaded frozen Memory Head from {head_pt}")
+
+            self._load_checkpoint_v0(args.path_ckpt.replace("_head.pt", "_base.pt") if "_head.pt" in args.path_ckpt else args.path_ckpt, model=self.model, strict=False)
+            self.model.eval()
+            for p in self.model.parameters(): p.requires_grad = False
+            logging.info("Base AE Model loaded and Frozen for Phase 3.")
+
+            # 2. Initialize Phase 3 2D-CNN Model
+            self.cwt_model = NetAFDAE_2D_CWT(latent_dim=128).to(self.local_rank)
+            self.optimizer = optim.Adam(self.cwt_model.parameters(), lr=1e-4)
+
+            # If loading a specific Phase 3 checkpoint to resume
+            if args.path_ckpt and "cwt" in args.path_ckpt:
+                self._load_checkpoint_v0(args.path_ckpt, model=self.cwt_model, strict=True)
+
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.num_epochs, eta_min=0.)
 
         if self.local_rank == 0:
@@ -627,10 +670,13 @@ class ClassifierCNNAE(ClassifierBase):
         if self.ddp:
             if self.training_phase == 1:
                 self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
-            else:  # Phase 2
+            elif self.training_phase == 2:
                 # Only wrap the trainable part (memory_head) in DDP
                 # The base model is frozen and does not need to be wrapped
                 self.memory_head = DDP(self.memory_head, device_ids=[self.local_rank], output_device=self.local_rank)
+            elif self.training_phase == 3:
+                # Only wrap the CWT model
+                self.cwt_model = DDP(self.cwt_model, device_ids=[self.local_rank], output_device=self.local_rank)
 
         # self.criterion = nn.MSELoss().to(self.local_rank)  # Reconstruction loss
         self.criterion = nn.L1Loss().to(self.local_rank)
@@ -670,6 +716,8 @@ class ClassifierCNNAE(ClassifierBase):
             self._train_phase1(data)
         elif self.training_phase == 2:
             self._train_phase2(data)
+        elif self.training_phase == 3:
+            self._train_phase3(data)
         else:
             raise ValueError(f"Invalid training phase: {self.training_phase}")
 
@@ -890,6 +938,100 @@ class ClassifierCNNAE(ClassifierBase):
 
         return total_loss
 
+    def _batch_cwt(self, residuals_tensor):
+        """
+        Convert a batch of residuals (GPU Tensor) to CWT images.
+        Operations performed on CPU via pywt, then moved back to GPU.
+        """
+        # residuals: (B, 1, 448) -> numpy (B, 448)
+        residuals_np = residuals_tensor.squeeze(1).detach().cpu().numpy()
+        batch_cwt = []
+        scales = np.arange(1, 65) # 64 scales
+
+        # Loop over batch (pywt does not support batch processing natively)
+        for i in range(residuals_np.shape[0]):
+            # 'cmor1.5-1.0' is a common Complex Morlet wavelet
+            coef, _ = pywt.cwt(residuals_np[i], scales, 'cmor1.5-1.0')
+            # magnitude, shape (64, 448)
+            cwt_img = np.abs(coef)
+            batch_cwt.append(cwt_img)
+
+        # Stack -> (B, 64, 448)
+        batch_cwt_np = np.stack(batch_cwt, axis=0)
+        # Add channel dim -> (B, 1, 64, 448)
+        batch_cwt_tensor = torch.from_numpy(batch_cwt_np).float().unsqueeze(1).to(self.local_rank)
+        return batch_cwt_tensor
+
+    def _train_phase3(self, data):
+        """
+        Phase 3: Train 2D-CNN-AE on CWT of residuals of hard normal samples.
+        """
+        if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
+            os.makedirs(self.save_dir)
+
+        # 1. Mining Hard Normal Samples
+        cwt_data_list = []
+
+        logging.info("Phase 3: Mining hard normal samples (MSE > 0.001)...")
+        full_dataset = HDF5PeakAlignedDataset(
+                data['train_path'],
+                self.transform_fn,
+                seq_len=self.features_generator.seq_len,
+                min_delta=MIN_VAL_TH,
+                only_normal=True # Only train on normal data
+            )
+        full_loader = DataLoader(dataset=full_dataset, batch_size=512, shuffle=False)
+
+        self.model.eval()
+        with torch.no_grad():
+            for inputs, _ in full_loader:
+                inputs = inputs.to(self.local_rank)
+                # Phase 1/2 Reconstruction
+                recons, _, _ = self.model(inputs)
+
+                # Calc per-sample MSE
+                loss_raw = (inputs - recons) ** 2
+                mse_per_sample = torch.mean(loss_raw, dim=(1, 2))
+
+                # Filter Hard Samples (> 0.001)
+                hard_indices = mse_per_sample > 0.001
+
+                if hard_indices.sum() > 0:
+                    residuals = inputs[hard_indices] - recons[hard_indices]
+                    # Convert to CWT
+                    cwts = self._batch_cwt(residuals) # (B_hard, 1, 64, 448)
+                    # To CPU to save GPU memory during collection
+                    cwt_data_list.append(cwts.cpu())
+
+        if not cwt_data_list:
+            logging.warning("No hard normal samples found for Phase 3.")
+            return
+
+        all_cwt_data = torch.cat(cwt_data_list, dim=0)
+        if self.rank == 0:
+            logging.info(f"Phase 3 Dataset Size: {len(all_cwt_data)} samples.")
+
+        # 2. Train CWT AE
+        cwt_dataset = TensorDataset(all_cwt_data)
+        loader = DataLoader(dataset=cwt_dataset, batch_size=128, shuffle=True)
+
+        for epoch in range(self.num_epochs): # Shorter epoch count typically sufficient for residual
+            epoch_loss = 0.0
+            for (batch_cwt,) in loader:
+                batch_cwt = batch_cwt.to(self.local_rank)
+                recon_cwt, _, _ = self.cwt_model(batch_cwt)
+                loss = F.mse_loss(recon_cwt, batch_cwt)
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+                epoch_loss += loss.item()
+
+            self.scheduler.step()
+            if self.rank == 0 and (epoch + 1) % 10 == 0:
+                logging.info(f"Phase 3 Epoch {epoch+1}, Loss: {epoch_loss / len(loader):.6f}")
+                torch.save(self.cwt_model.state_dict(), os.path.join(self.save_dir, 'phase3_cwt_best.pt'))
+
     def _diversity_loss(self) -> torch.Tensor:
         return torch.tensor(0.0).to(self.local_rank)
 
@@ -1020,6 +1162,10 @@ class ClassifierCNNAE(ClassifierBase):
         # 确保模型处于评估模式
         if self.training_phase == 2:
             self.memory_head.eval()
+        if self.training_phase == 3:
+            # Usually infer is called after training, logic is same as Phase 3 eval
+            self.cwt_model.eval()
+            if hasattr(self, 'memory_head'): self.memory_head.eval()
 
         model_to_infer = self.model.module if isinstance(self.model, DDP) else self.model
         model_to_infer.eval()
@@ -1045,18 +1191,37 @@ class ClassifierCNNAE(ClassifierBase):
                 # 2. 计算重构误差 (Reconstruction Error)，始终计算
                 recon_error = torch.mean((batch_x - reconstructions) ** 2, dim=tuple(range(1, batch_x.dim())))
 
-                # 3. 计算注意力熵 (Entropy Score)，只在阶段2计算
-                if self.training_phase == 2:
+                # 3. Phase 2 & 3: Memory Head Logic (if available)
+                entropy_score = torch.zeros_like(recon_error)
+
+                # If we have a memory head (Phase 2 or Phase 3 with MemAE base)
+                if hasattr(self, 'memory_head'):
                     attention_weights = self.memory_head(latents)
                     epsilon = 1e-12
                     entropy = -attention_weights * torch.log(attention_weights + epsilon)
                     entropy_score = torch.sum(entropy, dim=1)
-                else:
-                    # 阶段1没有 memory_head，熵分数为0
-                    entropy_score = torch.zeros_like(recon_error)
+
+                    # In Phase 2/3, we might calculate distance score too, but keeping method signature compatible
+                    # The 'entropy_score' return here is technically just 'extra_score'
+
+                # 4. Phase 3: Residual CWT Score
+                cwt_score = torch.zeros_like(recon_error)
+                if self.training_phase == 3:
+                    # Calculate Residual from Base Model
+                    residual = batch_x - reconstructions
+                    # Compute CWT
+                    cwt_imgs = self._batch_cwt(residual)
+                    # Reconstruct CWT
+                    cwt_recon, _, _ = self.cwt_model(cwt_imgs)
+                    # MSE of CWT
+                    cwt_score = torch.mean((cwt_imgs - cwt_recon) ** 2, dim=(1, 2, 3))
+
+                # Combined Score for Phase 3
+                # Note: 'entropy_score' output in signature is reused for combined auxiliary scores if P3
+                final_aux_score = entropy_score + cwt_score
 
                 all_recon_errors.append(recon_error.cpu().numpy())
-                all_entropy_scores.append(entropy_score.cpu().numpy())
+                all_entropy_scores.append(final_aux_score.cpu().numpy())
                 all_latents.append(latents.cpu().numpy())
 
         # 推理结束后，恢复模式

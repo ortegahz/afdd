@@ -30,12 +30,12 @@ def parse_args():
     parser.add_argument('--model_type', type=str, default='cnn-ae', choices=['cnn', 'cnn-ae'],
                         help='Type of CNN model to run: supervised (cnn) or unsupervised AE (cnn-ae)')
     parser.add_argument('--ae_model_type', type=str, default='ae',
-                        choices=['ae', 'unet', 'mem-ae', 'unet-mem', 'mem-flow-ae', '2d-cnn-ae-mtf'],
+                        choices=['ae', 'unet', 'mem-ae', 'unet-mem', 'mem-flow-ae', '2d-cnn-ae-mtf', '2d-cnn-ae-cwt'],
                         help="Type of AutoEncoder architecture to use.")
     parser.add_argument('--local_rank', type=int, default=0, help='Local rank for distributed training')
     parser.add_argument('--qat', default=False, help='enable quant-aware training')
-    parser.add_argument('--training_phase', type=int, default=1, choices=[1, 2],
-                        help="Training phase for AE models: 1 for reconstruction, 2 for memory head training.")
+    parser.add_argument('--training_phase', type=int, default=1, choices=[1, 2, 3],
+                        help="Training phase: 1 (Recon), 2 (Memory), 3 (Residual CWT).")
     parser.add_argument('--hard_example_threshold', type=float, default=0.8,
                         help="For phase 2, percentile threshold for hard example mining (e.g., 0.8 means top 20% hardest).")
     parser.add_argument('--contrastive_loss_weight', type=float, default=0.5,
