@@ -32,7 +32,7 @@ except ImportError:
 
 # --- 2. 配置部分 ---
 SEQ_LEN = 448
-DEFAULT_DATA_PATH = "/media/manu/ST8000DM004-2U91/tmp/afd.h5.v2"
+DEFAULT_DATA_PATH = "/media/manu/ST8000DM004-2U91/tmp/afd.h5.v3"
 # 默认模型路径，请修改为您实际的 .pt / .pth 文件路径
 DEFAULT_CKPT_PATH = "/home/manu/mnt/8gpu_3090/afdd_models_mp_v11/ae_best.pt"
 MIN_VAL_TH = 100
@@ -56,9 +56,13 @@ def load_keys(path):
 
 
 def get_signal_data(path, key):
+    """同时读取信号和标签"""
     with h5py.File(path, 'r') as f:
-        if key not in f: return None
-        return f[key]['signal'][:]
+        if key not in f: return None, None
+        sig = f[key]['signal'][:]
+        # 这里假设如果h5里有label_seq就读，没有就全0
+        lab = f[key]['label_seq'][:] if 'label_seq' in f[key] else np.zeros_like(sig)
+        return sig, lab
 
 
 def normalize_min_max(segment):
@@ -70,7 +74,7 @@ def normalize_min_max(segment):
 
 def load_model(ckpt_path):
     """
-    加载 Stage 1 MemoryAE 模型。
+    加载 Stage 1 MemoryAE / NetAFDAE 模型。
     包含处理 DDP (DistributedDataParallel) 产生的 'module.' 前缀的逻辑。
     """
     if not os.path.exists(ckpt_path):
@@ -213,30 +217,94 @@ def update_global_view(key):
     if not key:
         return go.Figure(), None, "No data selected."
 
-    sig = get_signal_data(ARGS.data_path, key)
+    sig, lab = get_signal_data(ARGS.data_path, key)
     if sig is None:
         return go.Figure(), None, "Error loading signal."
 
     # 寻找峰值用于标记
     peaks, _ = find_peaks(sig, prominence=ARGS.min_delta, distance=ARGS.distance)
 
+    # === Step 1: 批量计算所有 Peaks 的重构误差 (MSE) ===
+    # 用于决定 Peak 显示的颜色 (Normal/Abnormal/HighError)
+    mses = np.zeros(len(peaks))
+
+    if len(peaks) > 0 and MODEL is not None:
+        try:
+            segments = []
+            for p in peaks:
+                # 提取 Peak 对应的片段 [end-SEQ_LEN : end]
+                # 对齐策略：Peak 位于窗口的最末端
+                end_idx = p + 1
+                start_idx = end_idx - SEQ_LEN
+
+                if start_idx < 0:
+                    seg = sig[:end_idx]
+                    seg = np.pad(seg, (SEQ_LEN - len(seg), 0), 'constant')
+                else:
+                    seg = sig[start_idx:end_idx]
+
+                # 归一化 [-1, 1]
+                segments.append(normalize_min_max(seg))
+
+            # 批量推理
+            batch_tensor = torch.from_numpy(np.array(segments)).float().view(-1, 1, SEQ_LEN).to(DEVICE)
+            with torch.no_grad():
+                outputs = MODEL(batch_tensor)
+                recons = outputs[0] if isinstance(outputs, tuple) else outputs
+
+            # 计算 MSE
+            recons_np = recons.cpu().numpy().squeeze(1)
+            mses = np.mean((np.array(segments) - recons_np) ** 2, axis=1)
+
+        except Exception as e:
+            print(f"Batch inference failed: {e}")
+
+    # === Step 2: 确定 Peak 的颜色 ===
+    # 优先级: MSE > 0.001 (Yellow) > Label Abnormal (Red) > Normal (Blue)
+    peak_colors = []
+    for i, p in enumerate(peaks):
+        if mses[i] > 0.001:
+            peak_colors.append('#FFD700')  # Yellow (High Reconstruction Error)
+        elif lab[p] > 0:
+            peak_colors.append('#d62728')  # Red (Labeled Abnormal)
+        else:
+            peak_colors.append('#1f77b4')  # Blue (Normal)
+
+    # === Step 3: 绘制全局图 ===
     fig = go.Figure()
-    fig.add_trace(go.Scatter(y=sig, name='Raw Signal', line=dict(color='#1f77b4', width=1)))
+
+    # (A) 原始波形 - 正常部分 (蓝色底)
+    # 直接画整条线为蓝色，作为 base
+    fig.add_trace(go.Scatter(y=sig, name='Normal Signal', line=dict(color='#1f77b4', width=1)))
+
+    # (B) 原始波形 - 异常部分 (红色叠加)
+    # 利用 NaN 截断不连续的线段
+    sig_abnormal = sig.copy().astype(float)
+    sig_abnormal[lab == 0] = np.nan  # 将正常部分设为 NaN，使其不显示
+    # 只绘制 Label > 0 的部分
+    fig.add_trace(go.Scatter(y=sig_abnormal, name='Abnormal Signal', line=dict(color='#d62728', width=1.5)))
+
+    # (C) Peaks 标记 (X)
     fig.add_trace(go.Scatter(
         x=peaks, y=sig[peaks],
         mode='markers', name='Peaks',
-        marker=dict(size=8, color='red', symbol='x-thin', line=dict(width=2)),
+        # symbol='x', 加粗线条 (width=3) 确保黄色在白底下可见
+        marker=dict(size=10, color=peak_colors, symbol='x', line=dict(width=3, color=peak_colors)),
         customdata=peaks  # 存储索引，点击事件使用
     ))
 
+    # 计算一些统计信息
+    num_abnormal_peaks = np.sum(lab[peaks] > 0)
+    num_high_error_peaks = np.sum(mses > 0.001)
+
     fig.update_layout(
-        title=f"Sample: {key} (Found {len(peaks)} peaks)",
+        title=f"Sample: {key} (Peaks: {len(peaks)} | Labeled Abnormal: {num_abnormal_peaks} | High Res: {num_high_error_peaks})",
         template="plotly_white",
         margin=dict(l=40, r=40, t=40, b=40),
         hovermode="closest"
     )
 
-    return fig, sig.tolist(), f"Loaded {key} with {len(peaks)} peaks."
+    return fig, sig.tolist(), f"Loaded {key}. Yellow peaks: MSE > 0.001."
 
 
 @app.callback(
@@ -269,7 +337,7 @@ def update_detail_view(clickData, sig_list):
     else:
         raw_seg = sig[start_idx:end_idx]
 
-    # 1. 预处理：归一化 (Input)
+    # 1. 预处理：归一化 (Input) -> [-1, 1]
     norm_input = normalize_min_max(raw_seg)
 
     # 2. 模型推理 (Reconstruction + Residual)
@@ -299,9 +367,10 @@ def update_detail_view(clickData, sig_list):
     fig_rec.update_layout(
         title=f"Reconstruction at Peak {click_x}",
         xaxis_title="Time Step (0-447)",
-        yaxis_title="Normalized Amplitude",
+        yaxis_title="Normalized Amplitude [-1, 1]",
         template="plotly_white",
-        legend=dict(x=0, y=1)
+        legend=dict(x=0, y=1),
+        yaxis=dict(range=[-1.2, 1.2])  # 固定尺度
     )
 
     # === 绘图 2: 残差图 ===
@@ -318,7 +387,8 @@ def update_detail_view(clickData, sig_list):
         title=f"Residual Signal (MSE: {mse_val:.5f})",
         xaxis_title="Time Step",
         yaxis_title="Error (Input - Recon)",
-        template="plotly_white"
+        template="plotly_white",
+        yaxis=dict(range=[-1.2, 1.2])  # 固定尺度
     )
 
     return fig_rec, fig_res
