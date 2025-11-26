@@ -23,7 +23,7 @@ from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN
                                       HDF5Dataset, generate_augmented_samples,
                                       HDF5PeakAlignedDataset)
 from cores.loss import HardExampleMiningFocalLoss
-from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_2D_MTF
+from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_2D_MTF, create_flow_model
 from utils.macros import MIN_VAL_TH
 from utils.utils import make_dirs
 
@@ -456,7 +456,7 @@ class ClassifierCNNAE(ClassifierBase):
         self.num_epochs = 8192
         self.lr = 1e-4
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
-        self.training_phase = getattr(args, 'training_phase', 1)
+        self.training_phase = getattr(args, 'training_phase', 1)  # 1=Recon, 2=MemoryMLP, 3=Flow
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
         self.diversity_loss_weight = 0.0
         self.contrastive_loss_weight = getattr(args, 'contrastive_loss_weight', 0.0)
@@ -501,10 +501,10 @@ class ClassifierCNNAE(ClassifierBase):
         if self.training_phase == 1:
             self.model = model
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
-        else:
-            # 在阶段2，我们加载基础AE，冻结它，并只训练MemoryHead
-            if args.path_ckpt is None:
-                raise ValueError("Phase 2 training requires a checkpoint from Phase 1 via --path_ckpt.")
+        elif self.training_phase in [2, 3]:
+            # 在阶段2或3，我们加载基础AE，冻结它
+            if args.path_ckpt is None and self.training_phase == 2:
+                raise ValueError("Phase 2/3 training requires a checkpoint from previous phase via --path_ckpt.")
 
             # 1. 初始化模型 (base AE 和 memory head)
             base_model_type = 'ae' if 'unet' not in self.ae_model_type else 'unet'
@@ -517,11 +517,19 @@ class ClassifierCNNAE(ClassifierBase):
             # 2. 智能判断和分配检查点路径
             ckpt_path = args.path_ckpt
             base_ckpt_path, head_ckpt_path = None, None
+            flow_ckpt_path = None
+            proj_ckpt_path = None
 
-            if "_base.pt" in ckpt_path:
+            if "_flow.pt" in ckpt_path:
+                # Loading from phase 3 result
+                flow_ckpt_path = ckpt_path
+                head_ckpt_path = ckpt_path.replace("_flow.pt", "_head.pt")
+                base_ckpt_path = ckpt_path.replace("_flow.pt", "_base.pt")
+                proj_ckpt_path = ckpt_path.replace("_flow.pt", "_proj.pt")
+            elif "_base.pt" in ckpt_path:
                 base_ckpt_path = ckpt_path
                 head_ckpt_path = ckpt_path.replace("_base.pt", "_head.pt")
-            elif "_head.pt" in ckpt_path:
+            elif "_head.pt" in ckpt_path: # Phase 3 training starts here usually
                 head_ckpt_path = ckpt_path
                 base_ckpt_path = ckpt_path.replace("_head.pt", "_base.pt")
             else:  # 认为是第一阶段的检查点
@@ -533,10 +541,15 @@ class ClassifierCNNAE(ClassifierBase):
             self._load_checkpoint_v0(base_ckpt_path, model=self.model, strict=False)
 
             latent_dim = self.model.get_latent_dim()
+            
+            # For Phase 3, we MUST have a trained head from Phase 2
+            if self.training_phase == 3 and (not head_ckpt_path or not os.path.exists(head_ckpt_path)):
+                 raise FileNotFoundError(f"Phase 3 requires a trained Memory Head checkpoint: {head_ckpt_path}")
+
             if head_ckpt_path and os.path.exists(head_ckpt_path):
                 self.memory_head = MemoryHead(latent_dim=latent_dim, mem_dim=n_clusters, hidden_dim=latent_dim).to(self.local_rank)
                 self._load_checkpoint_v0(head_ckpt_path, model=self.memory_head, strict=True)
-                logging.info(f"Resuming phase 2 with loaded memory head from: {head_ckpt_path}")
+                logging.info(f"Loaded memory head from: {head_ckpt_path}")
             else:
                 logging.info("No head checkpoint found. Initializing new memory head.")
                 initial_memory_centers = None
@@ -607,12 +620,45 @@ class ClassifierCNNAE(ClassifierBase):
                     initial_memory=initial_memory_centers
                 ).to(self.local_rank)
 
-            # 4. 冻结基础AE并配置优化器
+            # 4. Freeze Base AE
             self.model.eval()
             for param in self.model.parameters():
                 param.requires_grad = False
             logging.info("Froze base AE model parameters.")
-            self.optimizer = optim.Adam(self.memory_head.parameters(), lr=self.lr)
+
+            if self.training_phase == 2:
+                # Train Memory Head
+                self.optimizer = optim.Adam(self.memory_head.parameters(), lr=self.lr)
+            elif self.training_phase == 3:
+                # Phase 3: Freeze Memory Head too, Train Flow
+                self.memory_head.eval()
+                for param in self.memory_head.parameters():
+                    param.requires_grad = False
+                logging.info("Froze Memory Head parameters for Phase 3.")
+
+                # --- [Modified] Dimensionality Reduction ---
+                # Force latent dim down to 16 to avoid curse of dimensionality for Flow
+                self.reduced_dim = 16
+                self.dim_reduction = nn.Linear(latent_dim, self.reduced_dim).to(self.local_rank)
+
+                if proj_ckpt_path and os.path.exists(proj_ckpt_path):
+                    self._load_checkpoint_v0(proj_ckpt_path, model=self.dim_reduction, strict=True)
+                    logging.info(f"Loaded Projection layer from: {proj_ckpt_path}")
+                else:
+                    logging.info(f"Initialized new Projection layer: {latent_dim} -> {self.reduced_dim}")
+
+                # Initialize Flow Model
+                # Input is now reduced_dim (16)
+                self.flow_model = create_flow_model(latent_dim=self.reduced_dim, hidden_features=self.reduced_dim*2).to(self.local_rank)
+                
+                if flow_ckpt_path and os.path.exists(flow_ckpt_path):
+                     self._load_checkpoint_v0(flow_ckpt_path, model=self.flow_model, strict=True)
+                     logging.info(f"Resumed Flow model from {flow_ckpt_path}")
+
+                # Optimizer must train both the Projection Layer and the Flow
+                params = list(self.flow_model.parameters()) + list(self.dim_reduction.parameters())
+                self.optimizer = optim.Adam(params, lr=1e-4)
+                self.ddp_flow = ddp # Flag to wrap flow if needed
 
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.num_epochs, eta_min=0.)
 
@@ -627,10 +673,15 @@ class ClassifierCNNAE(ClassifierBase):
         if self.ddp:
             if self.training_phase == 1:
                 self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
-            else:  # Phase 2
+            elif self.training_phase == 2:  # Phase 2
                 # Only wrap the trainable part (memory_head) in DDP
                 # The base model is frozen and does not need to be wrapped
                 self.memory_head = DDP(self.memory_head, device_ids=[self.local_rank], output_device=self.local_rank)
+            elif self.training_phase == 3:  # Phase 3
+                # Only wrap the flow model. memory_head is frozen and should NOT be wrapped.
+                # Also wrap the projection layer
+                self.flow_model = DDP(self.flow_model, device_ids=[self.local_rank], output_device=self.local_rank)
+                self.dim_reduction = DDP(self.dim_reduction, device_ids=[self.local_rank], output_device=self.local_rank)
 
         # self.criterion = nn.MSELoss().to(self.local_rank)  # Reconstruction loss
         self.criterion = nn.L1Loss().to(self.local_rank)
@@ -670,8 +721,93 @@ class ClassifierCNNAE(ClassifierBase):
             self._train_phase1(data)
         elif self.training_phase == 2:
             self._train_phase2(data)
+        elif self.training_phase == 3:
+            self._train_phase3(data)
         else:
             raise ValueError(f"Invalid training phase: {self.training_phase}")
+
+    def _train_phase3(self, data):
+        """
+        Phase 3: Train Normalizing Flow to estimate density of Stage 2 Features.
+        Input: Features from (Frozen AE -> Frozen MemoryHead MLP).
+        Training Data: ONLY Normal samples (label 0).
+        """
+        if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
+            os.makedirs(self.save_dir)
+
+        # Use PeakAligned dataset to get clean samples
+        dataset = HDF5PeakAlignedDataset(
+            data['train_path'],
+            self.transform_fn,
+            seq_len=self.features_generator.seq_len,
+            min_delta=MIN_VAL_TH,
+            only_normal=True # Critical: Flow must only learn the normal distribution
+        )
+        
+        is_distributed = self.ddp
+        train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None
+        loader = DataLoader(dataset=dataset, batch_size=1024, shuffle=not is_distributed, sampler=train_sampler)
+
+        best_loss = float('inf')
+        if self.ddp: self.flow_model.module.train() 
+        else: self.flow_model.train()
+
+        # Set reduction layer to train mode
+        self.dim_reduction.train()
+
+        for epoch in range(self.num_epochs):
+            epoch_start_time = time.time()
+            if is_distributed: train_sampler.set_epoch(epoch)
+            
+            epoch_loss = 0.0
+            num_batches = 0
+            
+            for inputs, _ in loader: # Ignore labels, we know they are 0
+                inputs = inputs.to(self.local_rank)
+                
+                with torch.no_grad():
+                    # Get Stage 2 Features
+                    _, latents, _ = self.model(inputs)
+                    # Pass through MLP (residual block), ignore memory bank logic
+                    if is_distributed:
+                         if isinstance(self.memory_head, DDP): z = self.memory_head.module(latents)
+                         else: z = self.memory_head(latents)
+                    else:
+                         z = self.memory_head(latents)
+
+                # --- Apply Reduction ---
+                proj_to_eval = self.dim_reduction.module if isinstance(self.dim_reduction, DDP) else self.dim_reduction
+                z_reduced = proj_to_eval(z)
+                
+                # Train Flow
+                # nflows returns negative log likelihood usually, or we negate log_prob
+                flow_out = self.flow_model if not is_distributed else self.flow_model.module
+                loss = -flow_out.log_prob(z_reduced).mean()
+                
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+                
+                epoch_loss += loss.item()
+                num_batches += 1
+            
+            self.scheduler.step()
+            avg_loss = epoch_loss / num_batches if num_batches > 0 else 0
+            
+            if self.rank == 0:
+                logging.info(f"Phase 3 - Epoch [{epoch+1}/{self.num_epochs}] Loss (NLL): {avg_loss:.6f}")
+                
+                if avg_loss < best_loss:
+                    best_loss = avg_loss
+                    flow_to_save = self.flow_model.module if is_distributed else self.flow_model
+                    proj_to_save = self.dim_reduction.module if is_distributed else self.dim_reduction
+                    # Should also save base and head for consistency, but flow is the only thing changing
+                    torch.save(flow_to_save.state_dict(), os.path.join(self.save_dir, 'phase3_best_flow.pt'))
+                    torch.save(proj_to_save.state_dict(), os.path.join(self.save_dir, 'phase3_best_proj.pt'))
+                    # Checkpoint all for easy loading
+                    # torch.save(self.model.state_dict(), os.path.join(self.save_dir, 'phase3_best_base.pt')) 
+                    # torch.save(self.memory_head.state_dict(), os.path.join(self.save_dir, 'phase3_best_head.pt')) 
+                    logging.info(f"Saved best Flow model.")
 
     def _train_phase2(self, data):
         """
@@ -1122,7 +1258,24 @@ class ClassifierCNNAE(ClassifierBase):
                     # Generic reconstruction error calculation
                     scores = torch.mean((inputs - reconstructions) ** 2,
                                         dim=tuple(range(1, inputs.dim()))).cpu().numpy()
-                else:  # Phase 2
+                elif self.training_phase == 3: # Phase 3: Flow
+                    # Get latents
+                    _, latents, _ = model_to_eval(inputs)
+                    head_to_eval = self.memory_head.module if isinstance(self.memory_head, DDP) else self.memory_head
+                    z_transformed = head_to_eval(latents)
+
+                    # --- Apply Reduction ---
+                    proj_to_eval = self.dim_reduction.module if isinstance(self.dim_reduction, DDP) else self.dim_reduction
+                    z_reduced = proj_to_eval(z_transformed)
+                    
+                    # Flow Score = -LogProb
+                    flow_to_eval = self.flow_model.module if isinstance(self.flow_model, DDP) else self.flow_model
+                    log_probs = flow_to_eval.log_prob(z_reduced)
+                    
+                    # Use Negative Log Likelihood
+                    scores = -log_probs.cpu().numpy()
+
+                else:  # Phase 2: Memory Distance
                     # Get latent vectors from the frozen encoder. Using forward pass for robust API.
                     _, latents, _ = model_to_eval(inputs)
 
@@ -1291,6 +1444,9 @@ class ClassifierCNNAE(ClassifierBase):
         model_to_eval.train()
         if self.training_phase == 2 and hasattr(self, 'memory_head'):
             self.memory_head.train()
+        if self.training_phase == 3 and hasattr(self, 'flow_model'):
+            self.flow_model.train()
+            self.dim_reduction.train()
 
         return f1
 
