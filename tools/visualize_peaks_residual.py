@@ -9,6 +9,7 @@ import dash_bootstrap_components as dbc
 import h5py
 import numpy as np
 import plotly.graph_objects as go
+import pywt
 import torch
 from dash import dcc, html, Input, Output, State
 from scipy.signal import find_peaks
@@ -188,6 +189,13 @@ app.layout = dbc.Container([
         ], width=6)
     ]),
 
+    dbc.Row([
+        dbc.Col([
+            html.H5("4. Residual Wavelet Transform (CWT Magnitude)"),
+            dcc.Graph(id='cwt-graph', style={'height': '400px'})
+        ], width=12)
+    ]),
+
     # 隐藏存储，用于避免重复加载 IO
     dcc.Store(id='current-signal-store'),
 ], fluid=True)
@@ -310,6 +318,7 @@ def update_global_view(key):
 @app.callback(
     Output('recon-graph', 'figure'),
     Output('resid-graph', 'figure'),
+    Output('cwt-graph', 'figure'),
     Input('global-graph', 'clickData'),
     State('current-signal-store', 'data')
 )
@@ -319,7 +328,7 @@ def update_detail_view(clickData, sig_list):
     empty_fig.update_layout(template="plotly_white")
 
     if not clickData or not sig_list:
-        return empty_fig, empty_fig
+        return empty_fig, empty_fig, empty_fig
 
     sig = np.array(sig_list)
     click_x = int(clickData['points'][0]['x'])
@@ -391,7 +400,27 @@ def update_detail_view(clickData, sig_list):
         yaxis=dict(range=[-1.2, 1.2])  # 固定尺度
     )
 
-    return fig_rec, fig_res
+    # === 绘图 3: 残差小波变换 (CWT) ===
+    # 尺度范围 1-64，使用复Morlet小波提取特征
+    scales = np.arange(1, 65)
+    coef, _ = pywt.cwt(residual, scales, 'cmor1.5-1.0')
+    cwt_power = np.abs(coef)  # 取模值
+
+    fig_cwt = go.Figure(data=go.Heatmap(
+        z=cwt_power,
+        x=np.arange(len(residual)),
+        y=scales,
+        colorscale='Viridis',
+        colorbar=dict(title="Magnitude")
+    ))
+    fig_cwt.update_layout(
+        title="Residual CWT Scalogram",
+        xaxis_title="Time Step",
+        yaxis_title="Scale (Low Freq -> High Freq)",
+        template="plotly_white"
+    )
+
+    return fig_rec, fig_res, fig_cwt
 
 
 def parse_args():
