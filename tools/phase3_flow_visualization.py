@@ -108,7 +108,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def plot_phase3_analysis(u_embedding, log_probs, labels, recon_errors, output_path, show_plot=False):
+def plot_phase3_analysis(u_embedding, log_probs, labels, dists_min, output_path, show_plot=False):
     """
     绘制 Phase 3 的综合分析图：
     1. Log-Likelihood 直方图 (核心指标)
@@ -121,8 +121,11 @@ def plot_phase3_analysis(u_embedding, log_probs, labels, recon_errors, output_pa
 
     # --- 图1: Log-Likelihood 分布直方图 ---
     fig_hist = go.Figure()
+    # 使用 -LogProb (NLL) 更直观，值越大越异常
+    nll = -log_probs
+
     fig_hist.add_trace(go.Histogram(
-        x=log_probs[neg_mask],
+        x=nll[neg_mask],
         name='Normal (Easy+Hard)',
         marker_color='dodgerblue',
         opacity=0.6,
@@ -236,9 +239,13 @@ def main():
     dim_reduction.to(device).eval()
 
     # --- 3. Load Flow Model ---
-    logging.info("Loading Flow Model...")
+    logging.info("Loading Conditional Flow Model (MoF)...")
     # 注意：输入维度现在是 reduced_dim (16)
-    flow_model = create_flow_model(latent_dim=reduced_dim, hidden_features=reduced_dim * 2)
+    flow_model = create_flow_model(
+        latent_dim=reduced_dim,
+        hidden_features=reduced_dim * 2,
+        context_features=reduced_dim  # <--- Condition 维度也为 16
+    )
     state_dict_flow = torch.load(args.path_ckpt_flow, map_location=device)
     new_state_flow = {k.replace('module.', ''): v for k, v in state_dict_flow.items()}
     flow_model.load_state_dict(new_state_flow)
@@ -257,8 +264,14 @@ def main():
     # Loader with shuffle=False for reproducibility
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
+    # --- [New Pre-calculation] Prepare Global Context (Projected Memory Bank) ---
+    logging.info("Projecting Memory Bank to create Global Context...")
+    with torch.no_grad():
+        # memory_head.memory is [1024, 128] -> Project to [1024, 16]
+        projected_memory = dim_reduction(memory_head.memory)
+
     # --- 5. Inference Loop ---
-    u_list, log_prob_list, label_list, error_list = [], [], [], []
+    u_list, log_prob_list, label_list, error_list, dist_list = [], [], [], [], []
     total_samples = 0
 
     logging.info("Processing samples...")
@@ -280,18 +293,27 @@ def main():
             # B.5 Projection (Linear Reduction)
             z_reduced = dim_reduction(z_mlp)
 
-            # C. Flow Model
-            # Calculate Log Probability
-            log_prob = flow_model.log_prob(z_reduced)
+            # --- [New Logic] Find Nearest Context ---
+            # Calculate distance between current batch samples [B, 16] and all memory slots [1024, 16]
+            dists = torch.cdist(z_reduced, projected_memory) # Output: [B, 1024]
+
+            # Find index of nearest slot
+            min_indices = torch.argmin(dists, dim=1) # [B]
+            min_dists_batch = torch.min(dists, dim=1)[0] # [B] Distance value
+
+            # Select the corresponding projected memory vectors as context
+            context = projected_memory[min_indices] # [B, 16]
+
+            # C. Flow Model (Conditional Inference)
+            # Calculate Log Probability P(z | c)
+            log_prob = flow_model.log_prob(inputs=z_reduced, context=context)
 
             # Calculate Transformed Latent (u) -> Expecting Gaussian Sphere
-            # Different libraries have different APIs.
-            # Assuming nflows-like: flow._transform(inputs) returns (noise, logabsdet)
-            # If your flow implementation doesn't expose this easily, we might skip t-SNE or use z_mlp
             try:
-                # 尝试获取映射后的高斯噪声 u
-                u_features, _ = flow_model._transform(z_reduced)
-            except AttributeError:
+                # nflows transform usually takes context as keyword arg
+                # transform_to_noise returns (noise, logabsdet)
+                u_features, _ = flow_model._transform(inputs=z_reduced, context=context)
+            except (AttributeError, TypeError):
                 # Fallback: 如果拿不到 u，就画 z_reduced，但颜色用 log_prob
                 u_features = z_reduced
 
@@ -299,6 +321,7 @@ def main():
             log_prob_list.append(log_prob.cpu())
             label_list.append(labels.cpu())
             error_list.append(recon_err.cpu())
+            dist_list.append(min_dists_batch.cpu())
 
             total_samples += inputs.size(0)
 
@@ -307,6 +330,7 @@ def main():
     log_probs = torch.cat(log_prob_list, dim=0).numpy()
     labels = torch.cat(label_list, dim=0).numpy().flatten()
     errors = torch.cat(error_list, dim=0).numpy()
+    dists_min = torch.cat(dist_list, dim=0).numpy()
 
     # --- 6. 难例过滤逻辑 (保持与训练一致) ---
     # 我们只关心那些“重构还可以，但在潜空间可能异常”的样本
@@ -331,11 +355,13 @@ def main():
         u_features_sample = u_features[indices]
         log_probs_sample = log_probs[indices]
         labels_sample = labels[indices]
+        dists_sample = dists_min[indices]
         logging.info("Subsampling to 5000 points for t-SNE...")
     else:
         u_features_sample = u_features
         log_probs_sample = log_probs
         labels_sample = labels
+        dists_sample = dists_min
 
     if SKLEARN_AVAILABLE:
         logging.info("Running t-SNE on Flow Transformed Features (u)...")

@@ -203,7 +203,7 @@ class MemoryModule(nn.Module):
         return z_retrieved, attention
 
 
-def create_flow_model(latent_dim, num_layers=4, hidden_features=64):
+def create_flow_model(latent_dim, num_layers=4, hidden_features=64, context_features=None):
     """辅助函数，用于创建 Normalizing Flow 模型 (RealNVP)"""
     try:
         from nflows.flows.base import Flow
@@ -220,7 +220,8 @@ def create_flow_model(latent_dim, num_layers=4, hidden_features=64):
         transforms.append(RandomPermutation(features=latent_dim))
         transforms.append(MaskedAffineAutoregressiveTransform(
             features=latent_dim,
-            hidden_features=hidden_features
+            hidden_features=hidden_features,
+            context_features=context_features
         ))
     transform = CompositeTransform(transforms)
     return Flow(transform, base_dist)
