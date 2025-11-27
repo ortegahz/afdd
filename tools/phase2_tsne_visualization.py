@@ -8,6 +8,7 @@ import sys
 import numpy as np
 import torch
 import torch.nn.functional as F
+import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -62,6 +63,11 @@ def parse_args():
         type=str,
         default="/home/manu/mnt/8gpu_3090/afdd_models_mp/phase2_best_head.pt",
         help="Phase 2 训练后的 Memory Head 模型路径。")
+    parser.add_argument(
+        '--path_ckpt_clf',
+        type=str,
+        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/phase2_best_clf.pt",
+        help="Phase 2 训练后的 Auxiliary Classifier 模型路径 (新增)。")
 
     # 常用参数
     parser.add_argument(
@@ -248,9 +254,26 @@ def main():
 
     memory_head.to(device)
     memory_head.eval()
-    logging.info("此模型 Phase 2 加载完成 (Base + Head)。")
 
-    # --- 3. 数据集 ---
+    # --- 3. 加载 Auxiliary Classifier (新增) ---
+    # 线性分类头: (latent_dim -> 1)
+    aux_clf = nn.Linear(latent_dim, 1)
+    if os.path.exists(args.path_ckpt_clf):
+        state_dict_clf = torch.load(args.path_ckpt_clf, map_location=device)
+        new_state_dict_clf = {}
+        for k, v in state_dict_clf.items():
+            new_state_dict_clf[k.replace('module.', '')] = v
+        aux_clf.load_state_dict(new_state_dict_clf)
+        logging.info(f"已加载辅助分类器: {args.path_ckpt_clf}")
+    else:
+        logging.warning("未找到辅助分类器权重文件，将使用随机初始化(仅用于测试流程)。")
+
+    aux_clf.to(device)
+    aux_clf.eval()
+
+    logging.info("此模型 Phase 2 加载完成 (Base + Head + Clf)。")
+
+    # --- 4. 数据集 ---
     gen = FeaturesGeneratorCNN()
     dataset = HDF5PeakAlignedDataset(
         hdf5_file_path=args.data_path,
@@ -265,9 +288,10 @@ def main():
     z_features_list = []
     labels_list = []
     recon_errors_list = []
+    clf_probs_list = []
 
     total_samples = 0
-    logging.info("开始提取特征 (Base -> Latent -> Residual MLP)...")
+    logging.info("开始提取特征 (Base -> Latent -> Residual MLP -> Clf)...")
 
     with torch.no_grad():
         for inputs, labels in tqdm(loader):
@@ -289,11 +313,17 @@ def main():
             labels_list.append(labels.cpu())
             recon_errors_list.append(errs.cpu())
 
+            # 3. Aux Classifier Prediction
+            logits = aux_clf(z).view(-1)
+            probs = torch.sigmoid(logits)
+            clf_probs_list.append(probs.cpu())
+
             total_samples += inputs.size(0)
 
     z_features = torch.cat(z_features_list, dim=0)
     all_labels = torch.cat(labels_list, dim=0).numpy().flatten()
     all_errors = torch.cat(recon_errors_list, dim=0).numpy()
+    all_probs = torch.cat(clf_probs_list, dim=0).numpy()
 
     # --- 过滤: 只保留重构误差 > 0.001 的样本 ---
     filter_th = 0.001
@@ -303,10 +333,28 @@ def main():
     z_features = z_features[torch.from_numpy(mask)]
     all_labels = all_labels[mask]
     all_errors = all_errors[mask]
+    all_probs = all_probs[mask]
 
     if len(all_labels) == 0:
         logging.error("No samples found matching the error threshold criteria.")
         return
+
+    # --- 打印分类器统计信息 ---
+    preds = (all_probs > 0.5).astype(int)
+    acc = np.mean(preds == all_labels)
+    # 计算 Recall (Abnormal) 和 Accuracy (Normal)
+    pos_idx = all_labels == 1
+    neg_idx = all_labels == 0
+    recall = np.mean(preds[pos_idx] == 1) if np.sum(pos_idx) > 0 else 0.0
+    tnr = np.mean(preds[neg_idx] == 0) if np.sum(neg_idx) > 0 else 0.0
+
+    logging.info("="*40)
+    logging.info(f"Aux Classifier Performance on Hard Samples (Error > {filter_th}):")
+    logging.info(f" -> Total Samples: {len(all_labels)}")
+    logging.info(f" -> Overall Accuracy: {acc:.4f}")
+    logging.info(f" -> Recall (Abnormal Detection): {recall:.4f}")
+    logging.info(f" -> TNR (Normal Specificity): {tnr:.4f}")
+    logging.info("="*40)
 
     # 截断到 max_samples
     if args.max_samples > 0 and len(z_features) > args.max_samples:

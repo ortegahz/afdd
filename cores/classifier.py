@@ -606,13 +606,21 @@ class ClassifierCNNAE(ClassifierBase):
                     hidden_dim=latent_dim,
                     initial_memory=initial_memory_centers
                 ).to(self.local_rank)
+            
+            # --- Add Auxiliary Classifier for Phase 2 ---
+            # 这是一个线性二分类头，用于辅助MemoryHead将异常样本推到线性可分的区域
+            self.aux_clf = nn.Linear(latent_dim, 1).to(self.local_rank)
+            logging.info("Initialized Auxiliary Classifier for Phase 2.")
 
             # 4. 冻结基础AE并配置优化器
             self.model.eval()
             for param in self.model.parameters():
                 param.requires_grad = False
             logging.info("Froze base AE model parameters.")
-            self.optimizer = optim.Adam(self.memory_head.parameters(), lr=self.lr)
+            
+            # 优化器同时更新 MemoryHead 和 AuxClassifier
+            params_phase2 = list(self.memory_head.parameters()) + list(self.aux_clf.parameters())
+            self.optimizer = optim.Adam(params_phase2, lr=self.lr)
 
         self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.num_epochs, eta_min=0.)
 
@@ -631,6 +639,7 @@ class ClassifierCNNAE(ClassifierBase):
                 # Only wrap the trainable part (memory_head) in DDP
                 # The base model is frozen and does not need to be wrapped
                 self.memory_head = DDP(self.memory_head, device_ids=[self.local_rank], output_device=self.local_rank)
+                self.aux_clf = DDP(self.aux_clf, device_ids=[self.local_rank], output_device=self.local_rank)
 
         # self.criterion = nn.MSELoss().to(self.local_rank)  # Reconstruction loss
         self.criterion = nn.L1Loss().to(self.local_rank)
@@ -765,6 +774,8 @@ class ClassifierCNNAE(ClassifierBase):
 
         best_loss = float('inf')
         self.memory_head.train()
+        self.aux_clf.train()
+        bce_criterion = nn.BCEWithLogitsLoss().to(self.local_rank)
 
         for epoch in range(self.num_epochs):
             epoch_start_time = time.time()
@@ -786,10 +797,20 @@ class ClassifierCNNAE(ClassifierBase):
                 # The memory head's forward pass transforms the latent space
                 z_transformed = head_module(latents)
                 memory_bank = head_module.memory
+                
+                # --- 1. Contrastive Cluster Loss ---
+                cluster_loss = self._contrastive_cluster_loss(z_transformed, labels, memory_bank)
 
-                # Calculate contrastive loss
-                total_loss = self._contrastive_cluster_loss(z_transformed, labels, memory_bank)
+                # --- 2. Auxiliary Classification Loss ---
+                # Handle DDP wrapping for aux_clf
+                clf_module = self.aux_clf.module if is_distributed else self.aux_clf
+                logits = clf_module(z_transformed).view(-1)
+                # labels: 0 for normal, 1 for abnormal. float conversion needed for BCE
+                cls_loss = bce_criterion(logits, labels.float())
 
+                # Combine losses (Weighted sum, assuming equally important for separation)
+                total_loss = cluster_loss + 1.0 * cls_loss
+                
                 self.optimizer.zero_grad()
                 total_loss.backward()
                 self.optimizer.step()
@@ -807,19 +828,22 @@ class ClassifierCNNAE(ClassifierBase):
                 logging.info(
                     f'Phase 2 - Epoch [{epoch + 1}/{self.num_epochs}], '
                     f'LR: {current_lr:.2e}, Time: {epoch_duration:.2f}s, '
-                    f'Loss: {avg_epoch_total_loss:.8f}'
+                    f'Loss: {avg_epoch_total_loss:.8f} (Cluster+Cls)'
                 )
 
                 if avg_epoch_total_loss < best_loss:
                     best_loss = avg_epoch_total_loss
                     model_to_save = self.model.module if isinstance(self.model, DDP) else self.model
                     head_to_save = self.memory_head.module if is_distributed else self.memory_head
+                    clf_to_save = self.aux_clf.module if is_distributed else self.aux_clf
 
                     base_path = os.path.join(self.save_dir, f'phase2_best_base.pt')
                     head_path = os.path.join(self.save_dir, f'phase2_best_head.pt')
+                    clf_path = os.path.join(self.save_dir, f'phase2_best_clf.pt')
 
                     torch.save(model_to_save.state_dict(), base_path)
                     torch.save(head_to_save.state_dict(), head_path)
+                    torch.save(clf_to_save.state_dict(), clf_path)
 
                     logging.info(f'Saved new best Phase 2 models with loss: {best_loss:.4f} to {head_path}')
 
@@ -1020,6 +1044,8 @@ class ClassifierCNNAE(ClassifierBase):
         # 确保模型处于评估模式
         if self.training_phase == 2:
             self.memory_head.eval()
+            if hasattr(self, 'aux_clf'):
+                self.aux_clf.eval()
 
         model_to_infer = self.model.module if isinstance(self.model, DDP) else self.model
         model_to_infer.eval()
