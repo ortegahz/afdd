@@ -11,7 +11,7 @@ import h5py
 import numpy as np
 import plotly.graph_objects as go
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 from dash import dcc, html, Input, Output, no_update
 from sklearn.manifold import TSNE
 from torch.utils.data import DataLoader
@@ -26,7 +26,7 @@ if project_root not in sys.path:
 from utils.macros import MIN_VAL_TH
 from cores.nets import NetAFDAE, NetAFDAE_UNet
 from cores.features_generator import FeaturesGeneratorCNN, HDF5PeakAlignedDataset
-from cores.classifier import MemoryHead
+from cores.classifier import MemoryHead, ArcMarginProduct
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -88,7 +88,8 @@ class DataManager:
         self.mem_head.load_state_dict({k.replace('module.', ''): v for k, v in state_head.items()})
 
         # 3. Aux Classifier
-        self.aux_clf = nn.Linear(latent_dim, 1).to(self.device).eval()
+        # s=30.0, m=0.5 必须与训练时保持一致
+        self.aux_clf = ArcMarginProduct(latent_dim, 2, s=30.0, m=0.50).to(self.device).eval()
         if os.path.exists(self.args.path_ckpt_clf):
             state_clf = torch.load(self.args.path_ckpt_clf, map_location=self.device)
             self.aux_clf.load_state_dict({k.replace('module.', ''): v for k, v in state_clf.items()})
@@ -127,8 +128,9 @@ class DataManager:
                 # Forward
                 recons, latents, _ = self.base_model(inputs)
                 z = self.mem_head(latents)
-                logits = self.aux_clf(z).view(-1)
-                probs = torch.sigmoid(logits)
+                # ArcFace Inference: label=None returns raw scaled logits [B, 2]
+                logits = self.aux_clf(z, label=None)
+                probs = F.softmax(logits, dim=1)[:, 1]
 
                 # Metrics
                 errs = torch.mean((inputs - recons) ** 2, dim=tuple(range(1, inputs.dim())))
@@ -241,7 +243,7 @@ app = dash.Dash(__name__, external_stylesheets=['https://codepen.io/chriddyp/pen
 
 # --- 布局 ---
 app.layout = html.Div([
-    html.H2("AFDD Phase 2 深度分析仪表盘", style={'textAlign': 'center'}),
+    html.H2("AFDD Phase 2 深度分析仪表盘 (ArcFace Enhanced)", style={'textAlign': 'center'}),
 
     html.Div([
         # 左侧：3D 特征空间
@@ -293,7 +295,7 @@ def get_3d_figure():
         mode='markers',
         marker=dict(size=sizes, color=colors, symbol=symbols, opacity=0.7),
         customdata=list(range(len(meta))),
-        text=[f"Loss: {m['error']:.4f}<br>Prob: {m['prob']:.4f}" for m in meta],
+        text=[f"Loss: {m['error']:.4f}<br>Prob (ArcFace): {m['prob']:.4f}" for m in meta],
         hoverinfo='text',
         name='Samples'
     )
@@ -373,7 +375,7 @@ def display_hover_data(hoverData):
         html.P(f"HDF5 Key: {meta['h5_key']}"),
         html.P(f"Slice Offset: {meta['end_idx']}"),
         html.Hr(),
-        html.P([html.B("AuxClf 异常概率: "), f"{meta['prob']:.6f}"]),
+        html.P([html.B("ArcFace 异常概率: "), f"{meta['prob']:.6f}"]),
         html.P([html.B("AE 重构误差: "), f"{meta['error']:.6f}"]),
         html.P([html.B("距最近Slot距离: "), f"{meta['min_dist']:.4f}"]),
     ]

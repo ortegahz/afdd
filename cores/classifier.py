@@ -3,6 +3,7 @@
 import logging
 import os
 import time
+import math
 
 import numpy as np
 import onnxruntime as ort
@@ -442,6 +443,55 @@ class MemoryHead(nn.Module):
         return x + self.residual_block(x)
 
 
+class ArcMarginProduct(nn.Module):
+    r"""Implement of large margin arc distance: :
+        Args:
+            in_features: size of each input sample
+            out_features: size of each output sample (usually number of classes)
+            s: norm of input feature
+            m: margin
+            cos(theta + m)
+    """
+    def __init__(self, in_features, out_features, s=30.0, m=0.50, easy_margin=False):
+        super(ArcMarginProduct, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.s = s
+        self.m = m
+        self.weight = nn.Parameter(torch.FloatTensor(out_features, in_features))
+        nn.init.xavier_uniform_(self.weight)
+
+        self.easy_margin = easy_margin
+        self.cos_m = math.cos(m)
+        self.sin_m = math.sin(m)
+        self.th = math.cos(math.pi - m)
+        self.mm = math.sin(math.pi - m) * m
+
+    def forward(self, input, label=None):
+        # --------------------------- cos(theta) & phi(theta) ---------------------------
+        # Normalize features and weights to Hypersphere
+        cosine = F.linear(F.normalize(input), F.normalize(self.weight))
+
+        # If Inference (label is None), return raw scaled cosine logits
+        if label is None:
+            return cosine * self.s
+
+        # Training: Apply Margin
+        sine = torch.sqrt(1.0 - torch.pow(cosine, 2))
+        phi = cosine * self.cos_m - sine * self.sin_m
+        if self.easy_margin:
+            phi = torch.where(cosine > 0, phi, cosine)
+        else:
+            phi = torch.where(cosine > self.th, phi, cosine - self.mm)
+        # --------------------------- convert label to one-hot ---------------------------
+        # one_hot = torch.zeros(cosine.size(), device='cuda')
+        one_hot = torch.zeros_like(cosine)
+        one_hot.scatter_(1, label.view(-1, 1).long(), 1)
+        # -------------torch.where(out_i = {x_i if condition_i else y_i) -------------
+        output = (one_hot * phi) + ((1.0 - one_hot) * cosine)
+        return output * self.s
+
+
 class ClassifierCNNAE(ClassifierBase):
     def __init__(self, args, ddp=False):
         """
@@ -607,10 +657,11 @@ class ClassifierCNNAE(ClassifierBase):
                     initial_memory=initial_memory_centers
                 ).to(self.local_rank)
             
-            # --- Add Auxiliary Classifier for Phase 2 ---
-            # 这是一个线性二分类头，用于辅助MemoryHead将异常样本推到线性可分的区域
-            self.aux_clf = nn.Linear(latent_dim, 1).to(self.local_rank)
-            logging.info("Initialized Auxiliary Classifier for Phase 2.")
+            # --- Add ArcFace Classifier for Phase 2 ---
+            # 改为 ArcFace (Angular Margin)，输出2类 (Normal, Abnormal)
+            # s: scale factor (通常30), m: margin (通常0.5)
+            self.aux_clf = ArcMarginProduct(latent_dim, 2, s=30.0, m=0.50).to(self.local_rank)
+            logging.info("Initialized ArcFace Classifier for Phase 2 (s=30, m=0.5).")
 
             # 4. 冻结基础AE并配置优化器
             self.model.eval()
@@ -775,7 +826,7 @@ class ClassifierCNNAE(ClassifierBase):
         best_loss = float('inf')
         self.memory_head.train()
         self.aux_clf.train()
-        bce_criterion = nn.BCEWithLogitsLoss().to(self.local_rank)
+        cls_criterion = nn.CrossEntropyLoss().to(self.local_rank)
 
         for epoch in range(self.num_epochs):
             epoch_start_time = time.time()
@@ -801,12 +852,11 @@ class ClassifierCNNAE(ClassifierBase):
                 # --- 1. Contrastive Cluster Loss ---
                 cluster_loss = self._contrastive_cluster_loss(z_transformed, labels, memory_bank)
 
-                # --- 2. Auxiliary Classification Loss ---
-                # Handle DDP wrapping for aux_clf
+                # --- 2. ArcFace Classification Loss ---
                 clf_module = self.aux_clf.module if is_distributed else self.aux_clf
-                logits = clf_module(z_transformed).view(-1)
-                # labels: 0 for normal, 1 for abnormal. float conversion needed for BCE
-                cls_loss = bce_criterion(logits, labels.float())
+                # ArcFace forward 需要传入 labels (Long) 以应用 Margin
+                logits = clf_module(z_transformed, labels.long())
+                cls_loss = cls_criterion(logits, labels.long())
 
                 # Combine losses (Weighted sum, assuming equally important for separation)
                 total_loss = cluster_loss + 1.0 * cls_loss
@@ -1159,14 +1209,17 @@ class ClassifierCNNAE(ClassifierBase):
                     # Transform latents using the trained Memory head
                     z_transformed = head_to_eval(latents)
 
-                    # Calculate distance-based anomaly score
-                    z_norm = F.normalize(z_transformed, p=2, dim=1)
-                    mem_norm = F.normalize(memory_bank, p=2, dim=1)
-                    cos_sim = F.linear(z_norm, mem_norm)
-                    max_sim, _ = torch.max(cos_sim, dim=1)
+                    # --- ArcFace Scoring ---
+                    # 使用 ArcFace 概率作为异常打分
+                    clf_head = self.aux_clf.module if isinstance(self.aux_clf, DDP) else self.aux_clf
 
-                    # Anomaly score is 1 - max_similarity. Higher score for anomalies.
-                    scores = (1.0 - max_sim).cpu().numpy()
+                    # 传入 label=None 获得原始余弦 Logits [B, 2]
+                    clf_logits = clf_head(z_transformed, label=None)
+
+                    # 取异常类 (Class 1) 的概率
+                    clf_scores = F.softmax(clf_logits, dim=1)[:, 1]
+
+                    scores = clf_scores.cpu().numpy()
 
                     reconstructions, *_ = model_to_eval(inputs)  # For plotting only
 
