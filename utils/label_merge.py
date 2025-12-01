@@ -77,8 +77,8 @@ def parse_args():
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v31/data_pick/neg/20214M000154AY028595 - o/afd',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v32/data_pick/pos/afd',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v35/data_pick/误动作电机误报 - o/afd',
-                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v37/afd',  # new
-                            "/media/manu/ST8000DM004-2U91/afdd/data/data_v39/afd",
+                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v37/afd',
+                            "/media/manu/ST8000DM004-2U91/afdd/data/data_v39/afd",  # new
                         ])
     parser.add_argument('--path_out', default='/media/manu/ST8000DM004-2U91/tmp/afd_pm_train')
     # parser.add_argument('--path_out', default='/home/manu/tmp/afd_pm_train')

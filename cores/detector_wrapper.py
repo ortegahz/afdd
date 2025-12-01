@@ -60,8 +60,8 @@ class DetectorWrapperV0(DetectorWrapperBase):
                                         cur_state_gt_normal=cur_state_gt_normal,
                                         cur_power_voltage=cur_power_voltage)
             if is_infer:
-                self.arc_detector.infer_v6(feat_sample=feat_sample, blacklist_sample=blacklist_sample)
-                # self.arc_detector.infer_v5(feat_sample=feat_sample)  # TAG: for mcu
+                # self.arc_detector.infer_v6(feat_sample=feat_sample, blacklist_sample=blacklist_sample)
+                self.arc_detector.infer_v5(feat_sample=feat_sample)  # TAG: for mcu
                 # self.arc_detector.infer_v3(feat_sample=feat_sample)
             if self.save_as_svm:
                 self.arc_detector.sample()
