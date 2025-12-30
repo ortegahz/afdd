@@ -183,12 +183,14 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
         min_val = torch.min(x_tensor)
         max_val = torch.max(x_tensor)
 
-        # 根据最大值和最小值将数据归一化到 [-1, 1]
-        # 如果 max_val 等于 min_val，说明信号是恒定的，为避免除以零，将其归一化为0
-        if (max_val - min_val) > 0:
-            x_signal = 2 * (x_tensor - min_val) / (max_val - min_val) - 1
-        else:
-            x_signal = torch.zeros_like(x_tensor)
+        # # 根据最大值和最小值将数据归一化到 [-1, 1]
+        # # 如果 max_val 等于 min_val，说明信号是恒定的，为避免除以零，将其归一化为0
+        # if (max_val - min_val) > 0:
+        #     x_signal = 2 * (x_tensor - min_val) / (max_val - min_val) - 1
+        # else:
+        #     x_signal = torch.zeros_like(x_tensor)
+
+        x_signal = (x_tensor - 2048) * 40 / 2048
 
         # 增加一个维度 (channel/batch dimension)
         x_signal = x_signal.unsqueeze(0)

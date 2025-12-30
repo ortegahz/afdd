@@ -153,7 +153,8 @@ class DataManager:
         indices_all = np.array(global_indices)
 
         # --- Filter: Error > 0.001 (Hard Examples) ---
-        mask = errors_all > 0.001
+        # mask = errors_all > 0.001
+        mask = np.ones(len(errors_all), dtype=bool)
 
         z_filtered = z_all[mask]
         labels_filtered = labels_all[mask]

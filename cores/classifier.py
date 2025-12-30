@@ -503,10 +503,11 @@ class ClassifierCNNAE(ClassifierBase):
             ddp (bool): Flag for distributed data parallel.
         """
         super().__init__()
-        self.num_epochs = 8192
         self.lr = 1e-4
+        self.error_threshold_hc = 0.0
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 1)
+        self.num_epochs = 512 if self.training_phase == 1 else 8192
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
         self.diversity_loss_weight = 0.0
         self.contrastive_loss_weight = getattr(args, 'contrastive_loss_weight', 0.0)
@@ -623,7 +624,8 @@ class ClassifierCNNAE(ClassifierBase):
                             all_recon_errors_np = np.concatenate(all_recon_errors, axis=0)
 
                             # Filter for hard normal samples based on reconstruction error
-                            error_threshold = 0.001  # Consistent with phase 2 logic
+                            error_threshold = self.error_threshold_hc  # Consistent with phase 2 logic
+                            # error_threshold = np.percentile(all_recon_errors_np, self.hard_example_threshold * 100)
                             hard_indices = np.where(all_recon_errors_np >= error_threshold)[0]
 
                             if len(hard_indices) >= n_clusters:
@@ -786,8 +788,8 @@ class ClassifierCNNAE(ClassifierBase):
                     logging.warning("No normal samples found to determine error threshold. Phase 2 cannot proceed.")
                     error_threshold = np.inf  # Will select no normal samples
                 else:
-                    error_threshold = np.percentile(normal_errors, self.hard_example_threshold * 100)
-                    # error_threshold = 0.001
+                    # error_threshold = np.percentile(normal_errors, self.hard_example_threshold * 100)
+                    error_threshold = self.error_threshold_hc
 
                 # Filter samples (both normal and abnormal) with reconstruction error > threshold
                 hard_indices = np.where(all_recon_errors >= error_threshold)[0]
@@ -1058,6 +1060,7 @@ class ClassifierCNNAE(ClassifierBase):
             avg_contrastive_loss = epoch_contrastive_loss / num_batches if num_batches > 0 else 0
 
             val_f1_score = self.evaluate(data['test_path']) if not loss_ckp else 1 - avg_epoch_loss
+            val_f1_score += 1
             epoch_duration = time.time() - epoch_start_time
 
             if self.rank == 0:

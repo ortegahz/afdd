@@ -36,9 +36,9 @@ def parse_args():
     parser.add_argument('--qat', default=False, help='enable quant-aware training')
     parser.add_argument('--training_phase', type=int, default=1, choices=[1, 2],
                         help="Training phase for AE models: 1 for reconstruction, 2 for memory head training.")
-    parser.add_argument('--hard_example_threshold', type=float, default=0.8,
+    parser.add_argument('--hard_example_threshold', type=float, default=0.0,
                         help="For phase 2, percentile threshold for hard example mining (e.g., 0.8 means top 20% hardest).")
-    parser.add_argument('--contrastive_loss_weight', type=float, default=0.5,
+    parser.add_argument('--contrastive_loss_weight', type=float, default=0.0,
                         help="Weight for the contrastive loss in phase 1. Default 0.0 to disable.")
     return parser.parse_args()
 
