@@ -32,6 +32,10 @@ torchrun --nproc_per_node=8 --master_addr=172.20.254.199 --master_port=29501 dem
 
 torchrun --nproc_per_node=8 --master_addr=172.20.254.200 --master_port=29501 demos/demo_classifier.py --load_dir /home/Huangzhe/Test/afd_pm_hdf5_org_v0  --save_dir /home/Huangzhe/Test/afdd_models_mp --model_type cnn
 
+torchrun --nproc_per_node=8 --master_addr=172.20.254.199 --master_port=29501 demos/demo_classifier.py --load_dir /home/Huangzhe/test/data_second  --save_dir /home/Huangzhe/test/afdd_models_mp --model_type cnn
+
+python demos/demo_classifier.py --load_dir /home/Huangzhe/test/data_second  --save_dir /home/Huangzhe/test/afdd_models_mp --model_type cnn
+
 # demo
 python demos/demo.py --dir_plot_save /home/manu/tmp/demo_arc_detector_save_single --dtr_type DetectorWrapperV0 --db_key default --addr "/home/manu/mnt/ST8000DM004-2U91/afdd/data/data_v21/data_sorted/自主正例/电钻最高速运行_0.npy"
 

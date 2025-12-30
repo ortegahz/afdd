@@ -54,8 +54,8 @@ class ClassifierCNN(ClassifierBase):
         super().__init__()
         self.qat = args.qat if not is_infer else False
         self.local_rank = args.rank if not is_infer else 0
-        self.num_epochs = 512
-        self.lr = 1e-4
+        self.num_epochs = 200
+        self.lr = 1e-3
         float_model = NetAFD().to(self.local_rank)
         if self.qat and not is_infer:
             float_model.eval()
@@ -69,7 +69,15 @@ class ClassifierCNN(ClassifierBase):
         else:
             self.model = float_model  # 普通浮点训练 / 推理
 
-        self.optimizer = optim.Adam(self.model.parameters(), self.lr)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer,
+            mode='max',
+            factor=0.9,
+            patience=30,
+            verbose=True,
+            min_lr=1e-6
+        )
         if is_infer:
             self._load_checkpoint_v0(args)
         elif args.path_ckpt is not None:
@@ -164,6 +172,7 @@ class ClassifierCNN(ClassifierBase):
                 self.optimizer.step()
             # val_accuracy = self.evaluate(x_val, y_val)
             val_accuracy = self.evaluate(data['test_path'])
+            self.scheduler.step(val_accuracy)
             epoch_duration = time.time() - epoch_start_time
             if self.qat and self.rank == 0:  # 只在主进程做
                 # self.model.cpu().eval()  # INT8 kernel 只在 CPU
