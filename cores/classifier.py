@@ -786,8 +786,8 @@ class ClassifierCNNAE(ClassifierBase):
                     logging.warning("No normal samples found to determine error threshold. Phase 2 cannot proceed.")
                     error_threshold = np.inf  # Will select no normal samples
                 else:
-                    # error_threshold = np.percentile(normal_errors, self.hard_example_threshold * 100)
-                    error_threshold = 0.001
+                    error_threshold = np.percentile(normal_errors, self.hard_example_threshold * 100)
+                    # error_threshold = 0.001
 
                 # Filter samples (both normal and abnormal) with reconstruction error > threshold
                 hard_indices = np.where(all_recon_errors >= error_threshold)[0]
