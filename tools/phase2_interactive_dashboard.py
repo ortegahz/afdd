@@ -147,13 +147,15 @@ class DataManager:
 
         # Concat
         z_all = torch.cat(z_list, dim=0)
-        labels_all = torch.cat(labels_list, dim=0).numpy()
+        labels_all = torch.cat(labels_list, dim=0).view(-1).numpy()
         errors_all = torch.cat(errors_list, dim=0).numpy()
         probs_all = torch.cat(probs_list, dim=0).numpy()
         indices_all = np.array(global_indices)
 
         # --- Filter: Error > 0.001 (Hard Examples) ---
-        mask = errors_all > 0.001
+        # 修改逻辑：保留所有异常样本(Label=1) 以及 重构误差大的正常样本
+        # 这样可以在仪表盘中观察到那些重构得很好但被分类器识别出来的故障
+        mask = (errors_all > 0.001) | (labels_all == 1)
 
         z_filtered = z_all[mask]
         labels_filtered = labels_all[mask]

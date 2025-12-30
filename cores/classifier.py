@@ -505,6 +505,7 @@ class ClassifierCNNAE(ClassifierBase):
         super().__init__()
         self.num_epochs = 8192
         self.lr = 1e-4
+        self.error_threshold_hard = 0.001
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 1)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
@@ -623,7 +624,7 @@ class ClassifierCNNAE(ClassifierBase):
                             all_recon_errors_np = np.concatenate(all_recon_errors, axis=0)
 
                             # Filter for hard normal samples based on reconstruction error
-                            error_threshold = 0.001  # Consistent with phase 2 logic
+                            error_threshold = self.error_threshold_hard  # Consistent with phase 2 logic
                             hard_indices = np.where(all_recon_errors_np >= error_threshold)[0]
 
                             if len(hard_indices) >= n_clusters:
@@ -777,7 +778,7 @@ class ClassifierCNNAE(ClassifierBase):
                 hard_labels_tensor = torch.empty(0)
             else:
                 all_inputs = torch.cat(all_inputs, dim=0)
-                all_labels = torch.cat(all_labels, dim=0).view(-1)
+                all_labels = torch.cat(all_labels, dim=0).view(-1).numpy()
                 all_recon_errors = torch.cat(all_recon_errors, dim=0).numpy()
 
                 # Find error threshold based on NORMAL samples only
@@ -787,13 +788,16 @@ class ClassifierCNNAE(ClassifierBase):
                     error_threshold = np.inf  # Will select no normal samples
                 else:
                     # error_threshold = np.percentile(normal_errors, self.hard_example_threshold * 100)
-                    error_threshold = 0.001
+                    error_threshold = self.error_threshold_hard
 
-                # Filter samples (both normal and abnormal) with reconstruction error > threshold
-                hard_indices = np.where(all_recon_errors >= error_threshold)[0]
+                # Filter samples:
+                # 1. Normal samples with high reconstruction error (Hard Normals)
+                # 2. ALL Abnormal samples (Positives), regardless of error
+                hard_indices = np.where((all_recon_errors >= error_threshold) | (all_labels == 1))[0]
 
                 hard_examples_tensor = all_inputs[hard_indices]
                 hard_labels_tensor = all_labels[hard_indices]
+                hard_labels_tensor = torch.from_numpy(hard_labels_tensor)
 
                 num_hard_normal = torch.sum(hard_labels_tensor == 0).item()
                 num_hard_abnormal = torch.sum(hard_labels_tensor == 1).item()
