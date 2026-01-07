@@ -14,6 +14,8 @@ from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from utils.macros import RECONS_TH
+
 # --- 路径修正 (确保能导入项目模块) ---
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
@@ -48,7 +50,7 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=512)
 
     # 策略参数
-    parser.add_argument('--fixed_recon_th', type=float, default=0.00007872,
+    parser.add_argument('--fixed_recon_th', type=float, default=RECONS_TH,
                         help="第一阶段固定的重构误差阈值 (Raw MSE)")
     parser.add_argument('--weight_step', type=float, default=0.05, help="第二阶段权重搜索步长")
 

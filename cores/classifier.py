@@ -25,7 +25,7 @@ from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN
                                       HDF5PeakAlignedDataset)
 from cores.loss import HardExampleMiningFocalLoss
 from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_2D_MTF
-from utils.macros import MIN_VAL_TH
+from utils.macros import MIN_VAL_TH, RECONS_TH
 from utils.utils import make_dirs
 
 
@@ -504,7 +504,7 @@ class ClassifierCNNAE(ClassifierBase):
         """
         super().__init__()
         self.lr = 1e-4
-        self.error_threshold_hard = 0.00007872
+        self.error_threshold_hard = RECONS_TH
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 1)
         self.num_epochs = 8192 * 4 if self.training_phase == 2 else 8192

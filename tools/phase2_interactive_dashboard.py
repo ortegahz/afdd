@@ -17,6 +17,8 @@ from sklearn.manifold import TSNE
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from utils.macros import RECONS_TH
+
 # --- 路径修正 ---
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
@@ -155,7 +157,7 @@ class DataManager:
         # --- Filter: Error > 0.001 (Hard Examples) ---
         # 修改逻辑：保留所有异常样本(Label=1) 以及 重构误差大的正常样本
         # 这样可以在仪表盘中观察到那些重构得很好但被分类器识别出来的故障
-        mask = (errors_all > 0.001) | (labels_all == 1)
+        mask = (errors_all > RECONS_TH) | (labels_all == 1)
 
         z_filtered = z_all[mask]
         labels_filtered = labels_all[mask]
