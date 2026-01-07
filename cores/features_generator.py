@@ -462,6 +462,52 @@ class HDF5SPDataset(torch.utils.data.Dataset):
                 return x_signal, y_tensor
 
 
+class HDF5ArcFaultDataset(torch.utils.data.Dataset):
+    def __init__(self, file_path, transform=None):
+        self.transform = transform
+
+        with h5py.File(file_path, 'r') as f:
+            self.features = np.array(f['features'])
+            self.labels = np.array(f['labels'])
+
+        # Data preprocessing
+        self.features = (self.features - 2048) * 40.0 / 2048.0
+        self.features = torch.FloatTensor(self.features).unsqueeze(1)
+
+        # Pad to 448 using replication of the first value (Left Padding)
+        if self.features.shape[-1] < 448:
+            pad_size = 448 - self.features.shape[-1]
+            left_vals = self.features[:, :, 0].unsqueeze(-1)
+            left_pad = left_vals.repeat(1, 1, pad_size)
+            self.features = torch.cat([left_pad, self.features], dim=2)
+
+        if self.features.shape[-1] < 448:
+            pad_size = 448 - self.features.shape[-1]
+            # 获取每条样本的第一个值 (N, 1, 1)
+            left_vals = self.features[:, :, 0].unsqueeze(-1)
+            # 重复展开成 (N, 1, pad_size)
+            left_pad = left_vals.repeat(1, 1, pad_size)
+            # 拼接到左边
+            self.features = torch.cat([left_pad, self.features], dim=2)
+
+        self.labels = torch.LongTensor(self.labels)
+
+        # Add samples attribute for compatibility with visualization tools
+        # List of (key, index) tuples. Using string index as key.
+        self.samples = [(str(i), i) for i in range(len(self.features))]
+
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, idx):
+        feature = self.features[idx]
+        label = self.labels[idx]
+
+        if self.transform:
+            feature = self.transform(feature)
+
+        return feature, label
+
 class HDF5SequentialSliceDataset(torch.utils.data.Dataset):
     """
     用于训练和评估的HDF5数据集，采用确定性的顺序滑窗切片。

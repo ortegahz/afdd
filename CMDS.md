@@ -30,8 +30,6 @@ torchrun --nproc_per_node=8 --master_addr=172.20.254.199 --master_port=29501 dem
 
 torchrun --nproc_per_node=8 --master_addr=172.20.254.199 --master_port=29501 demos/demo_classifier.py --load_dir /home/Huangzhe/test/afd_pm_hdf5  --save_dir /home/Huangzhe/test/afdd_models_mp
 
-torchrun --nproc_per_node=8 --master_addr=172.20.254.199 --master_port=29501 demos/demo_classifier.py --load_dir /home/Huangzhe/test/afd_pm_hdf5  --save_dir /home/Huangzhe/test/afdd_models_mp --path_ckpt /home/Huangzhe/test/afdd_models_mp_v11/ae_best.pt --training_phase 2
-
 torchrun --nproc_per_node=8 --master_addr=172.20.254.199 --master_port=29501 demos/demo_classifier.py --load_dir /home/Huangzhe/test/afd_pm_hdf5  --save_dir /home/Huangzhe/test/afdd_models_mp --path_ckpt /home/Huangzhe/test/afdd_models_mp_v15/ae_best.pt --training_phase 2
 
 # demo
@@ -60,3 +58,6 @@ INFO:root:Counter(y_train_aug) -> Counter({1: 4360633, 0: 4360632})
 INFO:root:Counter(y_test_aug) -> Counter({0: 1868843, 1: 1868842})
 INFO:root:Counter(y_train) -> Counter({0: 4360632, 1: 97882})
 INFO:root:Counter(y_test) -> Counter({0: 1868843, 1: 41949})
+
+# others
+pyinstaller --name temp --log-level=TRACE --clean --noupx /media/manu/ST2000DM005-2U911/workspace/afdd/demos/demo_classifier.py

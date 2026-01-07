@@ -27,7 +27,7 @@ if project_root not in sys.path:
 # --- 项目模块导入 ---
 from utils.macros import MIN_VAL_TH
 from cores.nets import NetAFDAE, NetAFDAE_UNet
-from cores.features_generator import FeaturesGeneratorCNN, HDF5PeakAlignedDataset
+from cores.features_generator import FeaturesGeneratorCNN, HDF5PeakAlignedDataset, HDF5ArcFaultDataset
 from cores.classifier import MemoryHead, ArcMarginProduct
 
 # 配置日志
@@ -45,7 +45,7 @@ def parse_args():
     parser.add_argument('--path_ckpt_clf', type=str,
                         default="/home/manu/mnt/8gpu_3090/afdd_models_mp/phase2_best_clf.pt")
     parser.add_argument('--data_path', type=str,
-                        default="/media/manu/ST8000DM004-2U91/tmp/afd.h5.v3")
+                        default="/home/manu/mnt/8gpu_3090/afd_pm_hdf5/test_data.h5")
 
     # 其他配置
     parser.add_argument('--ae_model_type', type=str, default='ae', choices=['ae', 'unet'])
@@ -103,13 +103,13 @@ class DataManager:
         gen = FeaturesGeneratorCNN()
         # 注意：这里不仅需要提取特征，还需要知道每个样本对应HDF5里的哪个位置
         # HDF5PeakAlignedDataset.samples 存储了 [(key, end_idx), ...]
-        dataset = HDF5PeakAlignedDataset(
-            hdf5_file_path=self.args.data_path,
-            transform=gen.transform_sample_ae,
-            seq_len=gen.seq_len,
-            min_delta=MIN_VAL_TH
-        )
-
+        # dataset = HDF5PeakAlignedDataset(
+        #     hdf5_file_path=self.args.data_path,
+        #     transform=gen.transform_sample_ae,
+        #     seq_len=gen.seq_len,
+        #     min_delta=MIN_VAL_TH
+        # )
+        dataset = HDF5ArcFaultDataset(self.args.data_path)
         # 使用 shuffle=False 确保 DataLoader 的顺序与 dataset.samples 一致
         loader = DataLoader(dataset, batch_size=self.args.batch_size, shuffle=False)
 
@@ -211,7 +211,12 @@ class DataManager:
         for i in range(len(indices_filtered)):
             orig_idx = indices_filtered[i]
             # 从 dataset.samples 获取 (h5_key, end_idx)
-            h5_key, end_idx = dataset.samples[orig_idx]
+            if isinstance(dataset, HDF5ArcFaultDataset):
+                # For new dataset, samples are just (str(idx), idx)
+                h5_key, end_idx = dataset.samples[orig_idx]
+            else:
+                # For old dataset
+                h5_key, end_idx = dataset.samples[orig_idx]
 
             self.metadata.append({
                 'id': i,
@@ -229,12 +234,25 @@ class DataManager:
     def get_raw_waveform(self, meta_idx):
         """根据元数据索引读取原始波形"""
         meta = self.metadata[meta_idx]
-        seq_len = 448  # Hardcoded or from config
-        # 如果长度不够，dataset那边应该已经处理了，这里假设 idx 有效
-        start_idx = meta['end_idx'] - seq_len
 
-        with h5py.File(self.args.data_path, 'r') as f:
-            sig = f[meta['h5_key']]['signal'][start_idx: meta['end_idx']]
+        # Check if we are using the new dataset type (by checking if h5_key is a digit string)
+        # A more robust way would be to store the dataset type in metadata, but this works for now.
+        is_new_dataset = meta['h5_key'].isdigit()
+
+        if is_new_dataset:
+            # New dataset: read from memory (we need to re-instantiate or keep dataset ref,
+            # but for simplicity, we re-open h5 flatly or just use the index if we had the dataset object)
+            # Since we don't keep dataset object, we read from file using the flat index
+            with h5py.File(self.args.data_path, 'r') as f:
+                sig = f['features'][int(meta['h5_key'])]
+                # Preprocessing to match training data scale (optional for visualization but good for consistency)
+                # sig = (sig - 2048) * 40.0 / 2048.0
+        else:
+            # Old dataset logic
+            seq_len = 448
+            start_idx = meta['end_idx'] - seq_len
+            with h5py.File(self.args.data_path, 'r') as f:
+                sig = f[meta['h5_key']]['signal'][start_idx: meta['end_idx']]
         return sig
 
 

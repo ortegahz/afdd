@@ -22,7 +22,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from cores.features_generator import (FeaturesGeneratorXGB, FeaturesGeneratorCNN, InferenceDataset,
                                       HDF5Dataset, generate_augmented_samples,
-                                      HDF5PeakAlignedDataset)
+                                      HDF5PeakAlignedDataset, HDF5ArcFaultDataset)
 from cores.loss import HardExampleMiningFocalLoss
 from cores.nets import NetAFD, NetAFDAE, NetAFDAE_UNet, NetAFDAE_2D_MTF
 from utils.macros import MIN_VAL_TH, RECONS_TH
@@ -751,12 +751,13 @@ class ClassifierCNNAE(ClassifierBase):
                 f"Starting Phase 2: Hard Example Mining with threshold percentile {self.hard_example_threshold}...")
 
             # Use the full dataset to find hard examples from both normal and abnormal data
-            full_dataset = HDF5PeakAlignedDataset(
-                data['train_path'],
-                self.transform_fn,
-                seq_len=self.features_generator.seq_len,
-                min_delta=MIN_VAL_TH
-            )
+            # full_dataset = HDF5PeakAlignedDataset(
+            #     data['train_path'],
+            #     self.transform_fn,
+            #     seq_len=self.features_generator.seq_len,
+            #     min_delta=MIN_VAL_TH
+            # )
+            full_dataset = HDF5ArcFaultDataset(data['train_path'])
             full_loader = DataLoader(dataset=full_dataset, batch_size=2048, shuffle=False)
 
             all_inputs, all_labels, all_recon_errors = [], [], []
@@ -975,11 +976,12 @@ class ClassifierCNNAE(ClassifierBase):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
 
-        dataset = HDF5PeakAlignedDataset(
-            data['train_path'],
-            self.transform_fn,
-            seq_len=self.features_generator.seq_len,
-            min_delta=MIN_VAL_TH)
+        # dataset = HDF5PeakAlignedDataset(
+        #     data['train_path'],
+        #     self.transform_fn,
+        #     seq_len=self.features_generator.seq_len,
+        #     min_delta=MIN_VAL_TH)
+        dataset = HDF5ArcFaultDataset(data['train_path'])
 
         is_distributed = isinstance(self.model, DDP)
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None

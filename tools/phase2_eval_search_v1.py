@@ -24,7 +24,7 @@ if project_root not in sys.path:
 # --- 项目模块导入 ---
 from utils.macros import MIN_VAL_TH
 from cores.nets import NetAFDAE, NetAFDAE_UNet
-from cores.features_generator import FeaturesGeneratorCNN, HDF5PeakAlignedDataset
+from cores.features_generator import FeaturesGeneratorCNN, HDF5PeakAlignedDataset, HDF5ArcFaultDataset
 from cores.classifier import MemoryHead, ArcMarginProduct
 
 # 配置日志
@@ -42,7 +42,7 @@ def parse_args():
     parser.add_argument('--path_ckpt_clf', type=str,
                         default="/home/manu/mnt/8gpu_3090/afdd_models_mp/phase2_best_clf.pt")
     parser.add_argument('--data_path', type=str,
-                        default="/media/manu/ST8000DM004-2U91/tmp/afd.h5.v3")
+                        default="/home/manu/mnt/8gpu_3090/afd_pm_hdf5/test_data.h5")
 
     # 模型与计算配置
     parser.add_argument('--ae_model_type', type=str, default='ae', choices=['ae', 'unet'])
@@ -95,12 +95,13 @@ class Phase2Evaluator:
         """
         logging.info(">>> 开始全量推理与特征提取...")
         gen = FeaturesGeneratorCNN()
-        dataset = HDF5PeakAlignedDataset(
-            hdf5_file_path=self.args.data_path,
-            transform=gen.transform_sample_ae,
-            seq_len=gen.seq_len,
-            min_delta=MIN_VAL_TH
-        )
+        # dataset = HDF5PeakAlignedDataset(
+        #     hdf5_file_path=self.args.data_path,
+        #     transform=gen.transform_sample_ae,
+        #     seq_len=gen.seq_len,
+        #     min_delta=MIN_VAL_TH
+        # )
+        dataset = HDF5ArcFaultDataset(self.args.data_path)
         loader = DataLoader(dataset, batch_size=self.args.batch_size, shuffle=False, num_workers=4)
 
         all_labels = []

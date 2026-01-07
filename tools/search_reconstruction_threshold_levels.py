@@ -18,7 +18,7 @@ if project_root not in sys.path:
 # --- 项目模块导入 ---
 from utils.macros import MIN_VAL_TH
 from cores.nets import NetAFDAE, NetAFDAE_UNet
-from cores.features_generator import FeaturesGeneratorCNN, HDF5PeakAlignedDataset
+from cores.features_generator import FeaturesGeneratorCNN, HDF5PeakAlignedDataset, HDF5ArcFaultDataset
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -29,10 +29,10 @@ def parse_args():
 
     # 路径参数
     parser.add_argument('--path_ckpt_base', type=str,
-                        default="/home/manu/mnt/8gpu_3090/afdd_models_mp_v15/ae_best.pt",
+                        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/ae_best.pt",
                         help="Base AE 模型权重路径")
     parser.add_argument('--data_path', type=str,
-                        default="/media/manu/ST8000DM004-2U91/tmp/afd.h5.v3",
+                        default="/home/manu/mnt/8gpu_3090/afd_pm_hdf5/train_data.h5",
                         help="HDF5 数据集路径")
 
     # 其他配置
@@ -67,12 +67,13 @@ def main():
     # 2. 准备数据加载器
     logging.info(">>> 正在准备数据...")
     gen = FeaturesGeneratorCNN()
-    dataset = HDF5PeakAlignedDataset(
-        hdf5_file_path=args.data_path,
-        transform=gen.transform_sample_ae,
-        seq_len=gen.seq_len,
-        min_delta=MIN_VAL_TH
-    )
+    # dataset = HDF5PeakAlignedDataset(
+    #     hdf5_file_path=args.data_path,
+    #     transform=gen.transform_sample_ae,
+    #     seq_len=gen.seq_len,
+    #     min_delta=MIN_VAL_TH
+    # )
+    dataset = HDF5ArcFaultDataset(args.data_path)
 
     # 使用较大的 batch_size 加速推理，不需要 shuffle
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)

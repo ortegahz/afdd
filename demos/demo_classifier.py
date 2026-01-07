@@ -112,7 +112,7 @@ def run_cnn_ae(args, is_distributed):
 
     classifier = ClassifierCNNAE(args, ddp=is_distributed)
     _data = {
-        'train_path': os.path.join(args.load_dir, 'afd.h5.v3'),
+        'train_path': os.path.join(args.load_dir, 'train_data.h5'),
         'test_path': os.path.join(args.load_dir, 'test_data.h5'),
     }
     # The training data in train_path should consist of mostly normal samples.
