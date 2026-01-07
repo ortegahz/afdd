@@ -29,7 +29,7 @@ def parse_args():
 
     # 路径参数
     parser.add_argument('--path_ckpt_base', type=str,
-                        default="/home/manu/mnt/8gpu_3090/afdd_models_mp/phase2_best_base.pt",
+                        default="/home/manu/mnt/8gpu_3090/afdd_models_mp_v15/ae_best.pt",
                         help="Base AE 模型权重路径")
     parser.add_argument('--data_path', type=str,
                         default="/media/manu/ST8000DM004-2U91/tmp/afd.h5.v3",

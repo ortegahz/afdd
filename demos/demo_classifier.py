@@ -38,7 +38,7 @@ def parse_args():
                         help="Training phase for AE models: 1 for reconstruction, 2 for memory head training.")
     parser.add_argument('--hard_example_threshold', type=float, default=0.8,
                         help="For phase 2, percentile threshold for hard example mining (e.g., 0.8 means top 20% hardest).")
-    parser.add_argument('--contrastive_loss_weight', type=float, default=0.5,
+    parser.add_argument('--contrastive_loss_weight', type=float, default=0.0,
                         help="Weight for the contrastive loss in phase 1. Default 0.0 to disable.")
     return parser.parse_args()
 
@@ -112,7 +112,7 @@ def run_cnn_ae(args, is_distributed):
 
     classifier = ClassifierCNNAE(args, ddp=is_distributed)
     _data = {
-        'train_path': os.path.join(args.load_dir, 'train_data.h5'),
+        'train_path': os.path.join(args.load_dir, 'afd.h5.v3'),
         'test_path': os.path.join(args.load_dir, 'test_data.h5'),
     }
     # The training data in train_path should consist of mostly normal samples.
