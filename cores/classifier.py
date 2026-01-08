@@ -506,6 +506,7 @@ class ClassifierCNNAE(ClassifierBase):
         self.lr = 1e-4
         self.error_threshold_hard = RECONS_TH
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
+        self.model_type = getattr(args, 'model_type', 'cnn-ae')
         self.training_phase = getattr(args, 'training_phase', 1)
         self.num_epochs = 8192 * 4 if self.training_phase == 2 else 8192
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
@@ -527,7 +528,7 @@ class ClassifierCNNAE(ClassifierBase):
 
         # --- Phase-dependent model initialization ---
         model = None
-        if self.ae_model_type == 'ae':
+        if self.ae_model_type == 'ae' or self.model_type == 'cnn-ae-hybrid':
             model = NetAFDAE().to(self.local_rank)
             self.use_mem_ae = False
         elif self.ae_model_type == 'unet':
@@ -549,7 +550,16 @@ class ClassifierCNNAE(ClassifierBase):
         else:
             raise ValueError(f"Unsupported AE model type: {self.ae_model_type}")
 
-        if self.training_phase == 1:
+        if self.model_type == 'cnn-ae-hybrid':
+            self.model = model
+            latent_dim = self.model.get_latent_dim()
+            # Initialize ArcFace Head immediately for single phase training
+            self.aux_clf = ArcMarginProduct(latent_dim, 2, s=30.0, m=0.50).to(self.local_rank)
+            logging.info("Initialized Single-Phase Hybrid Model: NetAFDAE + ArcMarginProduct")
+
+            params = list(self.model.parameters()) + list(self.aux_clf.parameters())
+            self.optimizer = optim.Adam(params, lr=self.lr, weight_decay=1e-5)
+        elif self.training_phase == 1:
             self.model = model
             self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
         else:
@@ -687,6 +697,9 @@ class ClassifierCNNAE(ClassifierBase):
         if self.ddp:
             if self.training_phase == 1:
                 self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
+            elif self.model_type == 'cnn-ae-hybrid':
+                self.model = DDP(self.model, device_ids=[self.local_rank], output_device=self.local_rank)
+                self.aux_clf = DDP(self.aux_clf, device_ids=[self.local_rank], output_device=self.local_rank)
             else:  # Phase 2
                 # Only wrap the trainable part (memory_head) in DDP
                 # The base model is frozen and does not need to be wrapped
@@ -727,7 +740,9 @@ class ClassifierCNNAE(ClassifierBase):
         return torch.mean(torch.sum(entropy, dim=1))
 
     def train(self, data):
-        if self.training_phase == 1:
+        if self.model_type == 'cnn-ae-hybrid':
+            self._train_single_phase(data)
+        elif self.training_phase == 1:
             self._train_phase1(data)
         elif self.training_phase == 2:
             self._train_phase2(data)
@@ -972,6 +987,89 @@ class ClassifierCNNAE(ClassifierBase):
     def _diversity_loss(self) -> torch.Tensor:
         return torch.tensor(0.0).to(self.local_rank)
 
+    def _train_single_phase(self, data):
+        """
+        单阶段混合训练：同时优化重构损失和ArcFace分类损失。
+        - 重构损失：仅针对 Normal 样本 (Label=0) 计算，避免模型学会重构异常。
+        - ArcFace损失：针对所有样本计算，强迫 Latent Space 可分。
+        """
+        if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
+            os.makedirs(self.save_dir)
+
+        dataset = HDF5ArcFaultDataset(data['train_path'])
+        is_distributed = isinstance(self.model, DDP)
+        train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None
+        loader = DataLoader(dataset=dataset, batch_size=1024, shuffle=not is_distributed, sampler=train_sampler)
+
+        cls_criterion = nn.CrossEntropyLoss().to(self.local_rank)
+        best_f1 = 0.0
+
+        for epoch in range(self.num_epochs):
+            epoch_start_time = time.time()
+            if is_distributed:
+                train_sampler.set_epoch(epoch)
+
+            epoch_loss = 0.0
+            epoch_recon_loss = 0.0
+            epoch_cls_loss = 0.0
+            num_batches = 0
+
+            self.model.train()
+            self.aux_clf.train()
+
+            for inputs, labels in loader:
+                inputs = inputs.to(self.local_rank)
+                labels = labels.to(self.local_rank)
+
+                # 1. Forward Pass (AE)
+                # NetAFDAE returns: reconstructed_x, z, None
+                recons, latents, _ = self.model(inputs)
+
+                # 2. Reconstruction Loss (Only on Normal samples)
+                normal_mask = (labels == 0)
+                if normal_mask.sum() > 0:
+                    recon_loss = self.criterion(recons[normal_mask], inputs[normal_mask])
+                else:
+                    recon_loss = torch.tensor(0.0).to(self.local_rank)
+
+                # 3. ArcFace Classification Loss (On All samples)
+                clf_module = self.aux_clf.module if is_distributed else self.aux_clf
+                logits = clf_module(latents, labels.long())
+                cls_loss = cls_criterion(logits, labels.long())
+
+                # 4. Combined Loss
+                # 权重可调，通常 ArcFace loss 较大，Recon loss 较小
+                total_loss = recon_loss + 1.0 * cls_loss
+
+                self.optimizer.zero_grad()
+                total_loss.backward()
+                self.optimizer.step()
+
+                epoch_loss += total_loss.item()
+                epoch_recon_loss += recon_loss.item()
+                epoch_cls_loss += cls_loss.item()
+                num_batches += 1
+
+            self.scheduler.step()
+
+            avg_loss = epoch_loss / num_batches if num_batches > 0 else 0
+            avg_recon = epoch_recon_loss / num_batches if num_batches > 0 else 0
+            avg_cls = epoch_cls_loss / num_batches if num_batches > 0 else 0
+
+            # Evaluate using the new hybrid evaluation
+            val_f1, best_w = self.evaluate_hybrid(data['test_path'])
+            epoch_duration = time.time() - epoch_start_time
+
+            if self.rank == 0:
+                current_lr = self.optimizer.param_groups[0]['lr']
+                logging.info(f'Epoch [{epoch+1}/{self.num_epochs}] LR: {current_lr:.2e} Time: {epoch_duration:.2f}s | '
+                             f'Loss: {avg_loss:.4f} (Recon: {avg_recon:.4f}, Cls: {avg_cls:.4f}) | Val F1: {val_f1:.4f} (w={best_w:.1f})')
+
+                if val_f1 > best_f1:
+                    best_f1 = val_f1
+                    torch.save(self.model.state_dict(), os.path.join(self.save_dir, 'hybrid_best_ae.pt'))
+                    torch.save(self.aux_clf.state_dict(), os.path.join(self.save_dir, 'hybrid_best_clf.pt'))
+
     def _train_phase1(self, data, loss_ckp=True):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
@@ -1100,8 +1198,8 @@ class ClassifierCNNAE(ClassifierBase):
         # 确保模型处于评估模式
         if self.training_phase == 2:
             self.memory_head.eval()
-            if hasattr(self, 'aux_clf'):
-                self.aux_clf.eval()
+        if hasattr(self, 'aux_clf'):
+            self.aux_clf.eval()
 
         model_to_infer = self.model.module if isinstance(self.model, DDP) else self.model
         model_to_infer.eval()
@@ -1147,6 +1245,90 @@ class ClassifierCNNAE(ClassifierBase):
             self.memory_head.train()
 
         return np.concatenate(all_recon_errors), np.concatenate(all_latents), np.concatenate(all_entropy_scores)
+
+    def evaluate_hybrid(self, test_path, batch_size=1024):
+        """
+        混合评估函数：
+        1. 计算重构误差 (Recon Error)
+        2. 计算分类概率 (Cls Probability, Class 1)
+        3. 归一化两者。
+        4. 搜索最佳权重 w，使得 Score = w * Recon + (1-w) * Cls 的 F1 分数最高。
+        """
+        # dataset = HDF5PeakAlignedDataset(
+        #     hdf5_file_path=test_path,
+        #     transform=self.transform_fn,
+        #     seq_len=self.features_generator.seq_len,
+        #     min_delta=MIN_VAL_TH
+        # )
+        dataset = HDF5ArcFaultDataset(test_path)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+        model_to_eval = self.model.module if isinstance(self.model, DDP) else self.model
+        clf_to_eval = self.aux_clf.module if isinstance(self.aux_clf, DDP) else self.aux_clf
+
+        model_to_eval.eval()
+        clf_to_eval.eval()
+
+        all_recon_errors = []
+        all_cls_probs = []
+        all_labels = []
+
+        with torch.no_grad():
+            for inputs, labels in loader:
+                inputs = inputs.to(self.local_rank)
+
+                # 1. AE Inference
+                recons, latents, _ = model_to_eval(inputs)
+                recon_err = torch.mean((inputs - recons) ** 2, dim=tuple(range(1, inputs.dim()))).cpu().numpy()
+
+                # 2. ArcFace Inference
+                # label=None returns raw cosine logits * s
+                logits = clf_to_eval(latents, label=None)
+                probs = F.softmax(logits, dim=1)[:, 1].cpu().numpy() # Probability of being Abnormal (Class 1)
+
+                all_recon_errors.extend(recon_err)
+                all_cls_probs.extend(probs)
+                all_labels.extend(labels.numpy())
+
+        all_recon_errors = np.array(all_recon_errors)
+        all_cls_probs = np.array(all_cls_probs)
+        all_labels = np.array(all_labels)
+
+        # Normalize Reconstruction Errors to [0, 1] for fusion
+        _min, _max = all_recon_errors.min(), all_recon_errors.max()
+        if _max - _min > 1e-6:
+            recon_norm = (all_recon_errors - _min) / (_max - _min)
+        else:
+            recon_norm = np.zeros_like(all_recon_errors)
+
+        # Search for best weight w
+        best_f1 = 0.0
+        best_w = 0.0
+
+        # w ranges from 0.0 (Pure Classification) to 1.0 (Pure Reconstruction)
+        for w in np.linspace(0, 1, 11):
+            combined_scores = w * recon_norm + (1 - w) * all_cls_probs
+
+            # Find best threshold for this w
+            fpr, tpr, thresholds = roc_curve(all_labels, combined_scores)
+            # Avoid division by zero
+            denom = tpr + (1 - fpr)
+            # Simple heuristic to pick a threshold close to optimal point (0,1)
+            # Or just use max F1 search
+
+            # Let's do a quick search for threshold to maximize F1
+            # Since we are inside a loop, we can use a simplified approach or check percentiles
+            # Here we iterate a few percentiles or use the thresholds from ROC
+            # To save time, we sample 50 thresholds from the ROC result
+            indices = np.linspace(0, len(thresholds)-1, 50).astype(int)
+            for th in thresholds[indices]:
+                preds = (combined_scores >= th).astype(int)
+                f1 = f1_score(all_labels, preds)
+                if f1 > best_f1:
+                    best_f1 = f1
+                    best_w = w
+
+        return best_f1, best_w
 
     def evaluate(self, test_path, batch_size=1024, threshold=None, plot_positive_index=None, plot_negative_index=None):
         """

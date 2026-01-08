@@ -27,8 +27,8 @@ def parse_args():
     parser.add_argument('--path_label_train', default='/home/manu/tmp/afd_pm_train')
     # parser.add_argument('--path_label_test', default='/home/Huangzhe/test/afd_pm_test')
     parser.add_argument('--path_ckpt', default=None)
-    parser.add_argument('--model_type', type=str, default='cnn-ae', choices=['cnn', 'cnn-ae'],
-                        help='Type of CNN model to run: supervised (cnn) or unsupervised AE (cnn-ae)')
+    parser.add_argument('--model_type', type=str, default='cnn-ae', choices=['cnn', 'cnn-ae', 'cnn-ae-hybrid'],
+                        help='Type of CNN model to run: supervised (cnn), unsupervised AE (cnn-ae), or hybrid (cnn-ae-hybrid)')
     parser.add_argument('--ae_model_type', type=str, default='ae',
                         choices=['ae', 'unet', 'mem-ae', 'unet-mem', 'mem-flow-ae', '2d-cnn-ae-mtf'],
                         help="Type of AutoEncoder architecture to use.")
@@ -140,7 +140,7 @@ def main_worker(rank, world_size, args):
     args.world_size = world_size
     if args.model_type == 'cnn':
         run_cnn(args, is_distributed)
-    elif args.model_type == 'cnn-ae':
+    elif args.model_type in ['cnn-ae', 'cnn-ae-hybrid']:
         run_cnn_ae(args, is_distributed)
 
 
