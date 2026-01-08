@@ -15,7 +15,7 @@ def parse_args():
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v26 - duke/data_sorted - o/负载抑制 - o/afd',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v26 - duke/data_sorted - o/串联碳化 - o/afd',
                             '/media/manu/ST8000DM004-2U91/afdd/data/data_v26 - duke/data_sorted - o/并联碳化 - o/afd',
-                            '/media/manu/ST8000DM004-2U91/afdd/data/data_v26 - duke/data_sorted - o/并联金属 - o/afd',
+                            # '/media/manu/ST8000DM004-2U91/afdd/data/data_v26 - duke/data_sorted - o/并联金属 - o/afd',
                         ])
     parser.add_argument('--path_out', default='/media/manu/ST8000DM004-2U91/tmp/afd_dir_list.txt')
     return parser.parse_args()

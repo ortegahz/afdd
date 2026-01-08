@@ -232,7 +232,8 @@ class DetectorWrapperV3NPY(DetectorWrapperV2):
             self.db_offline = DataV4(case_path)
             self.db_offline.load()
             for key in self.db_offline.db.keys():
-                self._process_single(key, f'{_cnt}_' + case_name, feat_sample=_feat_sample, blacklist_sample=_blacklist_sample)
+                self._process_single(key, f'{_cnt}_' + case_name, feat_sample=_feat_sample,
+                                     blacklist_sample=_blacklist_sample)
                 _cnt += 1
 
 
@@ -264,3 +265,43 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
             self.arc_detector.save_feats_ref()
         if _blacklist_sample:
             self.arc_detector.save_feats_ref_blacklist()
+
+
+class DetectorWrapperV4H5(DetectorWrapperV3BIN):
+
+    def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV6'):
+        super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
+        self.save_as_h5 = True
+        self.save_as_svm = False
+
+    def run(self):
+        if not os.path.exists(self.addr):
+            logging.error(f"List file not found: {self.addr}")
+            return
+
+        with open(self.addr, 'r') as f:
+            dir_list = [line.strip() for line in f.readlines() if line.strip()]
+
+        _cnt = 0
+        for dir_path in dir_list:
+            logging.info(f"Scanning directory: {dir_path}")
+
+            folder_name = os.path.basename(dir_path.rstrip(os.sep))
+            self.h5_path = os.path.join(dir_path, f"{folder_name}.h5")
+
+            if os.path.exists(self.h5_path):
+                os.remove(self.h5_path)
+
+            cases_path = glob.glob(os.path.join(dir_path, '**', '*.bin'), recursive=True)
+
+            for idx, case_path in enumerate(cases_path):
+                logging.info(f'[{idx} / {len(cases_path)}] Processing case: {case_path}')
+                try:
+                    self.db_offline = eval(self.dbo_type)(case_path)
+                    self.db_offline.load()
+
+                    for key in self.db_offline.db.keys():
+                        self._process_single(key, f'{_cnt}_' + folder_name, is_infer=False)
+                        _cnt += 1
+                except Exception as e:
+                    logging.error(f"Failed to process {case_path}: {e}")
