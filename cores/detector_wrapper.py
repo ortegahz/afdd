@@ -32,7 +32,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
 
         # --- Configurable saving options ---
         self.svm_label_file = '/media/manu/ST8000DM004-2U91/tmp/afd'
-        self.save_as_svm, self.save_as_h5 = False, True
+        self.save_as_svm, self.save_as_h5 = True, False
         self.h5_path = '/media/manu/ST8000DM004-2U91/tmp/afd.h5'
 
         if self.save_as_svm and os.path.exists(self.svm_label_file):

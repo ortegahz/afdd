@@ -54,7 +54,7 @@ class ClassifierCNN(ClassifierBase):
         super().__init__()
         self.qat = args.qat if not is_infer else False
         self.local_rank = args.rank if not is_infer else 0
-        self.num_epochs = 200
+        self.num_epochs = 512
         self.lr = 1e-3
         float_model = NetAFD().to(self.local_rank)
         if self.qat and not is_infer:
