@@ -32,7 +32,7 @@ class DetectorWrapperV0(DetectorWrapperBase):
 
         # --- Configurable saving options ---
         self.svm_label_file = '/media/manu/ST8000DM004-2U91/tmp/afd'
-        self.save_as_svm, self.save_as_h5 = True, False
+        self.save_as_svm, self.save_as_h5 = False, False
         self.h5_path = '/media/manu/ST8000DM004-2U91/tmp/afd.h5'
 
         if self.save_as_svm and os.path.exists(self.svm_label_file):
@@ -241,6 +241,7 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
 
     def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV0'):
         super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
+        self.save_as_svm, self.save_as_h5 = True, False
 
     def run(self, _feat_sample=True, _blacklist_sample=False):
         _cnt = 0

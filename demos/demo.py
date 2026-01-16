@@ -43,10 +43,10 @@ def parse_args():
     # parser.add_argument('--db_key', default=None)
     # parser.add_argument('--dbo_type', default='DataV4')
     # parser.add_argument('--addr',
-    #                     default='/media/manu/ST8000DM004-2U91/afdd/data/data_v39/fault-arc-pick/20214M000154AY024094 - p/alarm/0e0438f8-ba0b-11f0-b7d4-cbadb6c66928/data.bin')
+    #                     default='/media/manu/ST8000DM004-2U91/afdd/data/data_v37/raw_bin_20k/0084_20k.bin')
     # parser.add_argument('--dtr_type', default='DetectorWrapperV0')
     # parser.add_argument('--db_key', default='default')
-    parser.add_argument('--addr', default='/media/manu/ST8000DM004-2U91/afdd/data/data_v26 - duke/data_sorted - t/')
+    parser.add_argument('--addr', default='/media/manu/ST8000DM004-2U91/afdd/data/data_v37/raw_bin_20k/')
     parser.add_argument('--dtr_type', default='DetectorWrapperV3BIN')
     parser.add_argument('--db_key', default=None)
     # parser.add_argument('--addr', default="/media/manu/ST8000DM004-2U91/tmp/afd_dir_list.txt")
