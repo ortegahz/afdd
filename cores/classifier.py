@@ -54,7 +54,7 @@ class ClassifierCNN(ClassifierBase):
         super().__init__()
         self.qat = args.qat if not is_infer else False
         self.local_rank = args.rank if not is_infer else 0
-        self.num_epochs = 512
+        self.num_epochs = 128
         self.lr = 1e-3
         float_model = NetAFD().to(self.local_rank)
         if self.qat and not is_infer:
@@ -70,13 +70,18 @@ class ClassifierCNN(ClassifierBase):
             self.model = float_model  # 普通浮点训练 / 推理
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-5)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        # self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        #     self.optimizer,
+        #     mode='max',
+        #     factor=0.9,
+        #     patience=30,
+        #     verbose=True,
+        #     min_lr=1e-6
+        # )
+        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer,
-            mode='max',
-            factor=0.9,
-            patience=30,
-            verbose=True,
-            min_lr=1e-6
+            T_max=self.num_epochs,
+            eta_min=1e-6
         )
         if is_infer:
             self._load_checkpoint_v0(args)
@@ -172,7 +177,8 @@ class ClassifierCNN(ClassifierBase):
                 self.optimizer.step()
             # val_accuracy = self.evaluate(x_val, y_val)
             val_accuracy = self.evaluate(data['test_path'])
-            self.scheduler.step(val_accuracy)
+            # self.scheduler.step(val_accuracy)
+            self.scheduler.step()
             epoch_duration = time.time() - epoch_start_time
             if self.qat and self.rank == 0:  # 只在主进程做
                 # self.model.cpu().eval()  # INT8 kernel 只在 CPU
@@ -187,8 +193,10 @@ class ClassifierCNN(ClassifierBase):
                 int8_model = convert_fx(gm)
                 torch.save(int8_model.state_dict(), os.path.join(self.save_dir, 'qat_int8_final.pt'))
             if self.rank == 0:
+                current_lr = self.optimizer.param_groups[0]['lr']
                 logging.info(
                     f'Epoch [{epoch + 1}/{self.num_epochs}],'
+                    f' LR: {current_lr:.2e},'   
                     f' Loss std: {std_loss.item():.8f},'
                     f' Loss cos: {cos_loss.item():.8f},'
                     f' Loss: {loss.item():.8f},'
