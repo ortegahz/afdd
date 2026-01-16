@@ -144,10 +144,10 @@ def main() -> None:
         description="递归解析、抽取并绘制目录下全部 .bin 文件")
     # >>>>>>>>>  保持你的默认 root / out  <<<<<<<<<
     parser.add_argument("--root",
-                        default="/media/manu/ST8000DM004-2U91/afdd/data/data_v37/",
+                        default="/media/manu/ST8000DM004-2U91/afdd/data/data_v39/fault-arc-pick/",
                         help="含有原始 1 MSPS bin 的根目录")
     parser.add_argument("--out",
-                        default="/media/manu/ST8000DM004-2U91/tmp/",
+                        default="/media/manu/ST8000DM004-2U91/afdd/data/data_v39/fault-arc-pick-20k/",
                         help="抽取后 bin 输出目录")
     # 和以前一样：默认 True
     parser.add_argument("--show",
