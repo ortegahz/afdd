@@ -87,6 +87,8 @@ class DetectorWrapperV0(DetectorWrapperBase):
 
         # self.arc_detector.save_seq()
         # self.arc_detector.db.save()
+        if self.arc_detector.is_alarm:
+            self.arc_detector.alarm_seq_lst.append(case_name)
         self.arc_detector.reset()
 
     def run(self):
@@ -241,7 +243,8 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
 
     def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV0'):
         super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
-        self.save_as_svm, self.save_as_h5 = True, False
+        self.save_as_svm, self.save_as_h5 = False, False
+        self.is_infer = True
 
         if self.save_as_svm and os.path.exists(self.svm_label_file):
             os.remove(self.svm_label_file)
@@ -265,8 +268,10 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
             self.db_offline.load()
             for key in self.db_offline.db.keys():
                 self._process_single(key, f'{_cnt}_' + case_name, feat_sample=_feat_sample,
-                                     blacklist_sample=_blacklist_sample, is_infer=False)
+                                     blacklist_sample=_blacklist_sample, is_infer=self.is_infer)
                 _cnt += 1
+
+        print(f"alarm seq cnt --> {len(self.arc_detector.alarm_seq_lst)} / {_cnt} {self.arc_detector.alarm_seq_lst}")
 
         if _feat_sample:
             self.arc_detector.save_feats_ref()

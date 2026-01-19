@@ -22,6 +22,8 @@ from utils.macros import *
 
 class ArcDetector:
     def __init__(self):
+        self.alarm_seq_lst = list()
+        self.is_alarm = False
         self._build_model()
         self.ini_peak_cnt = 0
         self.peak_interval_pred = -1
@@ -265,6 +267,7 @@ class ArcDetector:
                 logging.error(f"Failed to save blacklist '{self.path_latent_blacklist}': {e}")
 
     def reset(self):
+        self.is_alarm = False
         self.last_peak_val = -1
         self.seq_power_proc_len = 0
         self.alarm_idle_cnt = 0
@@ -1301,6 +1304,7 @@ class ArcDetector:
             logging.info(f'end v1 -- > {self.alarm_arc_cnt}')
         _alarm_indicate_scale = ALARM_INDICATE_SCALE
         if self.alarm_idle_cnt > 0 and self.ini_peak_cnt == 0:  # idle alarm confirm
+            self.is_alarm = True
             print('arc fault alarm v0 !!!')
             self.db.db['rt'].seq_state_pred_arc[-1] = self.indicator_max_val * _alarm_indicate_scale
         if self.alarm_arc_idx_e > 0 and self.alarm_arc_idx_s > 0:
@@ -1314,6 +1318,7 @@ class ArcDetector:
                 if self.ini_peak_cnt < _ini_peak_cnt_th:  # idle state alarm
                     self.alarm_idle_cnt = 8
                 else:
+                    self.is_alarm = True
                     print('arc fault alarm v1 !!!')
                     self.db.db['rt'].seq_state_pred_arc[self.alarm_arc_idx_e - self.af_win_size:self.alarm_arc_idx_e] = \
                         [self.indicator_max_val * _alarm_indicate_scale] * self.af_win_size
