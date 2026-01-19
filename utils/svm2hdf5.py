@@ -13,9 +13,8 @@ from utils import set_logging, make_dirs, load_data
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--path_label_train', default='/home/Huangzhe/test/afd_pm_train')
-    parser.add_argument('--save_dir', default='/dev/shm/afd_pm_hdf5')
-    # parser.add_argument('--path_label_train', default='/home/manu/tmp/afd_pm_train')
-    # parser.add_argument('--save_dir', default='/home/manu/tmp/afd_pm_hdf5')
+    # parser.add_argument('--save_dir', default='/dev/shm/afd_pm_hdf5')
+    parser.add_argument('--save_dir', default='/home/Huangzhe/test/afd_pm_hdf5')
     return parser.parse_args()
 
 

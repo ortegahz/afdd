@@ -14,7 +14,7 @@ from sklearn.model_selection import train_test_split
 from xgboost import plot_importance
 
 from cores.classifier import ClassifierXGB, ClassifierCNN, ClassifierCNNAE
-from utils.utils import set_logging, svm_label2data_v1
+from utils.utils import set_logging, svm_label2data_v1, make_dirs
 
 
 def parse_args():
@@ -40,6 +40,8 @@ def parse_args():
                         help="For phase 2, percentile threshold for hard example mining (e.g., 0.8 means top 20% hardest).")
     parser.add_argument('--contrastive_loss_weight', type=float, default=0.5,
                         help="Weight for the contrastive loss in phase 1. Default 0.0 to disable.")
+    parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate for training')
+    parser.add_argument('--epochs', type=int, default=64, help='Number of epochs to train')
     return parser.parse_args()
 
 
@@ -147,6 +149,9 @@ def main_worker(rank, world_size, args):
 def main():
     set_logging()
     args = parse_args()
+
+    # os.makedirs(os.path.join(args.save_dir), exist_ok=True)
+    # make_dirs(args.save_dir, reset=True)
 
     # run_xgb(args)
     # run_cnn(args)

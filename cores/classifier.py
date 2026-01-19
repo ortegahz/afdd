@@ -54,8 +54,8 @@ class ClassifierCNN(ClassifierBase):
         super().__init__()
         self.qat = args.qat if not is_infer else False
         self.local_rank = args.rank if not is_infer else 0
-        self.num_epochs = 128
-        self.lr = 1e-3
+        self.num_epochs = getattr(args, 'epochs', 64)
+        self.lr = getattr(args, 'lr', 1e-3)
         float_model = NetAFD().to(self.local_rank)
         if self.qat and not is_infer:
             float_model.eval()
@@ -337,9 +337,11 @@ class ClassifierCNN(ClassifierBase):
                                         (feat_pt - feat_onnx).abs().max().item())
 
                 # ---------------- 4. 收集结果 ----------------------
-                probs = torch.sigmoid(out_onnx).flatten().cpu().numpy()
+                # probs = torch.sigmoid(out_onnx).flatten().cpu().numpy()
+                # feats_np = feat_onnx.flatten().cpu().numpy()
+                probs = torch.sigmoid(out_pt).flatten().cpu().numpy()
+                feats_np = feat_pt.flatten().cpu().numpy()
                 predictions.extend(probs)
-                feats_np = feat_onnx.flatten().cpu().numpy()
                 features.extend(feats_np)
 
         if check_onnx:
@@ -370,7 +372,22 @@ class ClassifierCNN(ClassifierBase):
                 all_labels.extend(labels.cpu().numpy())
                 _cnt += batch_size
         predictions = [1 if prob > 0.5 else 0 for prob in all_predictions]
-        # result = accuracy_score(all_labels, predictions)
+
+        # --- Calculate detailed statistics ---
+        # y_true = np.array(all_labels)
+        # y_pred = np.array(predictions)
+        y_true = np.array(all_labels).flatten()
+        y_pred = np.array(predictions).flatten()
+        num_pos = np.sum(y_true == 1)
+        num_neg = np.sum(y_true == 0)
+        correct_pos = np.sum((y_true == 1) & (y_pred == 1))
+        correct_neg = np.sum((y_true == 0) & (y_pred == 0))
+        acc_pos = correct_pos / num_pos if num_pos > 0 else 0.0
+        acc_neg = correct_neg / num_neg if num_neg > 0 else 0.0
+
+        if self.rank == 0:
+            logging.info(f'[Eval] Neg Acc: {acc_neg:.4f} ({correct_neg}/{num_neg}) | Pos Acc: {acc_pos:.4f} ({correct_pos}/{num_pos})')
+
         result = f1_score(all_labels, predictions)
         return result
 

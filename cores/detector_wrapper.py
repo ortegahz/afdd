@@ -243,6 +243,12 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
         super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
         self.save_as_svm, self.save_as_h5 = True, False
 
+        if self.save_as_svm and os.path.exists(self.svm_label_file):
+            os.remove(self.svm_label_file)
+
+        if self.save_as_h5 and self.h5_path and os.path.exists(self.h5_path):
+            os.remove(self.h5_path)
+
     def run(self, _feat_sample=True, _blacklist_sample=False):
         _cnt = 0
         cases_path = glob.glob(os.path.join(self.addr, '**', '*.bin'), recursive=True)
