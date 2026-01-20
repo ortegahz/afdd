@@ -244,7 +244,7 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
     def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV0'):
         super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
         self.save_as_svm, self.save_as_h5 = False, False
-        self.is_infer = True
+        self.is_infer = not self.save_as_svm  # must be
 
         if self.save_as_svm and os.path.exists(self.svm_label_file):
             os.remove(self.svm_label_file)
@@ -271,7 +271,7 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
                                      blacklist_sample=_blacklist_sample, is_infer=self.is_infer)
                 _cnt += 1
 
-        print(f"alarm seq cnt --> {len(self.arc_detector.alarm_seq_lst)} / {_cnt} {self.arc_detector.alarm_seq_lst}")
+        print(f"alarm seq cnt --> {len(self.arc_detector.alarm_seq_lst)} | {_cnt} {self.arc_detector.alarm_seq_lst}")
 
         if _feat_sample:
             self.arc_detector.save_feats_ref()

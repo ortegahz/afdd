@@ -91,7 +91,7 @@ class ArcDetector:
         self.alarm_idle_cnt = 0
         self.feats_ref = []
         self.seq_power_proc_len = 0
-        # self.export_onnx()
+        self.export_onnx()
         self.path_latent_whitelist = '/home/manu/tmp/latent_whitelist.npy'
         if os.path.exists(self.path_latent_whitelist):
             try:
@@ -126,8 +126,8 @@ class ArcDetector:
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp_v1/best_e348_b0.9867.pt'):
     # def _build_model(self, path_model='/home/manu/tmp/afdd_models_mp/best_e472_b0.9878.pt'):
     # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v9 - dv37/afdd_models_mp/best_e501_b0.9864.pt'):
-    def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v13 - v12 + data debug/afdd_models_mp/best_e334_b0.9897.pt'):
-    # def _build_model(self, path_model='/home/manu/mnt/8gpu_3090/afdd_models_mp/best_e165_b1.0000.pt'):
+    # def _build_model(self, path_model='/media/manu/ST8000DM004-2U91/afdd/models/models_arm/v13 - v12 + data debug/afdd_models_mp/best_e334_b0.9897.pt'):
+    def _build_model(self, path_model='/home/manu/mnt/8gpu_3090/afdd_models_mp/best_e199_b0.9889.pt'):
         # with open('/home/manu/tmp/model.pickle', 'rb') as f:
         #     self.classifier = pickle.load(f)
         self.classifier = ClassifierCNN(args=path_model, is_infer=True)
