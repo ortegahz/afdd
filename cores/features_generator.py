@@ -245,41 +245,41 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
         # Convert back to tensor, shape (1, image_size, image_size) for a single channel image
         return torch.from_numpy(mtf_image).float().squeeze(0).unsqueeze(0)
 
-    # @staticmethod
-    # def transform_sample(x_sample):
-    #     """
-    #     将样本转换为Tensor，进行Min-Max归一化，并进行填充。
-    #     """
-    #     x_tensor = torch.tensor(x_sample, dtype=torch.float32)
-    #     x_signal = x_tensor.clone()
-    #
-    #     # --- Min-Max 归一化开始 ---
-    #     # 1. 找到当前样本的最小值和最大值
-    #     min_val = torch.min(x_signal)
-    #     max_val = torch.max(x_signal)
-    #
-    #     # 2. 避免除以零的边缘情况 (如果信号是常数)
-    #     if max_val - min_val > 0:
-    #         # 应用 Min-Max 公式: (x - min) / (max - min)
-    #         x_signal = (x_signal - min_val) / (max_val - min_val)
-    #     else:
-    #         # 如果所有值都相同，则信号是平坦的，可以将其设置为全零
-    #         x_signal = torch.zeros_like(x_signal)
-    #     # --- Min-Max 归一化结束 ---
-    #
-    #     # 增加一个批次维度 (batch dimension)
-    #     x_signal = x_signal.unsqueeze(0)
-    #
-    #     # 计算使长度成为32的倍数所需的填充量
-    #     current_length = x_signal.shape[-1]
-    #     padding_required = (32 - (current_length % 32)) % 32
-    #     # 定义填充: (左侧填充, 右侧填充)
-    #     padding = (0, padding_required)
-    #
-    #     # 对信号进行填充
-    #     x_signal = F.pad(x_signal, padding, "constant", 0)
-    #
-    #     return x_signal
+    @staticmethod
+    def transform_sample_v1(x_sample):
+        """
+        将样本转换为Tensor，进行Min-Max归一化，并进行填充。
+        """
+        x_tensor = torch.tensor(x_sample, dtype=torch.float32)
+        x_signal = x_tensor.clone()
+
+        # --- Min-Max 归一化开始 ---
+        # 1. 找到当前样本的最小值和最大值
+        min_val = torch.min(x_signal)
+        max_val = torch.max(x_signal)
+
+        # 2. 避免除以零的边缘情况 (如果信号是常数)
+        if max_val - min_val > 0:
+            # 应用 Min-Max 公式: (x - min) / (max - min)
+            x_signal = (x_signal - min_val) / (max_val - min_val)
+        else:
+            # 如果所有值都相同，则信号是平坦的，可以将其设置为全零
+            x_signal = torch.zeros_like(x_signal)
+        # --- Min-Max 归一化结束 ---
+
+        # 增加一个批次维度 (batch dimension)
+        x_signal = x_signal.unsqueeze(0)
+
+        # 计算使长度成为32的倍数所需的填充量
+        current_length = x_signal.shape[-1]
+        padding_required = (32 - (current_length % 32)) % 32
+        # 定义填充: (左侧填充, 右侧填充)
+        padding = (0, padding_required)
+
+        # 对信号进行填充
+        x_signal = F.pad(x_signal, padding, "constant", 0)
+
+        return x_signal
 
     # @staticmethod
     # def transform_sample(x_sample, seq_len):

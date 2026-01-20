@@ -91,7 +91,7 @@ class ArcDetector:
         self.alarm_idle_cnt = 0
         self.feats_ref = []
         self.seq_power_proc_len = 0
-        self.export_onnx()
+        # self.export_onnx()
         self.path_latent_whitelist = '/home/manu/tmp/latent_whitelist.npy'
         if os.path.exists(self.path_latent_whitelist):
             try:

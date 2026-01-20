@@ -41,7 +41,7 @@ def parse_args():
     parser.add_argument('--contrastive_loss_weight', type=float, default=0.5,
                         help="Weight for the contrastive loss in phase 1. Default 0.0 to disable.")
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate for training')
-    parser.add_argument('--epochs', type=int, default=256, help='Number of epochs to train')
+    parser.add_argument('--epochs', type=int, default=8, help='Number of epochs to train')
     return parser.parse_args()
 
 

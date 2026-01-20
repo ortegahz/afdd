@@ -282,7 +282,7 @@ class ClassifierCNN(ClassifierBase):
     #     return np.array(predictions), np.array(features)
 
     def infer(self, x, batch_size=16,
-              check_onnx=True,  # 是否做对齐校验
+              check_onnx=False,  # 是否做对齐校验
               rtol=1e-02, atol=1e-05  # allclose 误差阈值
               ):
         """
