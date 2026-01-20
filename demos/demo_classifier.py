@@ -41,7 +41,8 @@ def parse_args():
     parser.add_argument('--contrastive_loss_weight', type=float, default=0.5,
                         help="Weight for the contrastive loss in phase 1. Default 0.0 to disable.")
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate for training')
-    parser.add_argument('--epochs', type=int, default=8, help='Number of epochs to train')
+    parser.add_argument('--epochs', type=int, default=256, help='Number of epochs to train')
+    parser.add_argument('--few_shot_exp', action='store_true', help='Run few-shot experiment loop')
     return parser.parse_args()
 
 
@@ -99,12 +100,54 @@ def run_cnn(args, is_distributed):
     # logging.info(f'Counter(y_test) -> {Counter(y_test)}')
     # x_train, y_train, alpha = _load_data(args.path_label_train)
     # x_test, y_test, _ = _load_data(args.path_label_test)
-    classifier = ClassifierCNN(args, ddp=is_distributed)
     _data = {
         'train_path': os.path.join(args.load_dir, 'train_data.h5'),
         'test_path': os.path.join(args.load_dir, 'test_data.h5'),
     }
-    classifier.train(_data)
+
+    if args.few_shot_exp:
+        # Define the ratios of positive samples to use
+        ratios = [0.01, 0.05, 0.1, 0.2, 0.5, 0.8, 1.0]
+        results = []
+
+        logging.info(f"Starting Few-Shot Experiment with ratios: {ratios}")
+
+        for r in ratios:
+            logging.info(f"--- Running Experiment with Positive Ratio: {r} ---")
+            # Re-initialize model for each ratio to train from scratch
+            classifier = ClassifierCNN(args, ddp=is_distributed)
+            classifier.train(_data, pos_ratio=r)
+
+            # Evaluate and get F1 score
+            f1 = classifier.evaluate(_data['test_path'])
+            results.append((r, f1))
+            logging.info(f"Ratio {r} Result: F1={f1:.4f}")
+
+        # Save results to txt and plot
+        if args.rank == 0:
+            save_path_txt = os.path.join(args.save_dir, 'cnn_few_shot_results.txt')
+            with open(save_path_txt, 'w') as f:
+                f.write("ratio,f1_score\n")
+                for r, score in results:
+                    f.write(f"{r},{score:.4f}\n")
+            logging.info(f"Saved few-shot results to {save_path_txt}")
+
+            try:
+                r_vals, f_vals = zip(*results)
+                plt.figure(figsize=(10, 6))
+                plt.plot(r_vals, f_vals, marker='o', linestyle='-', color='b', label='CNN')
+                plt.title('CNN Performance vs. Arc Data Availability')
+                plt.xlabel('Ratio of Arc Training Samples')
+                plt.ylabel('F1 Score')
+                plt.grid(True)
+                plt.legend()
+                plt.savefig(os.path.join(args.save_dir, 'cnn_few_shot_plot.png'))
+                logging.info("Saved plot to cnn_few_shot_plot.png")
+            except Exception as e:
+                logging.warning(f"Plotting failed: {e}")
+    else:
+        classifier = ClassifierCNN(args, ddp=is_distributed)
+        classifier.train(_data)
 
 
 def run_cnn_ae(args, is_distributed):

@@ -149,11 +149,33 @@ class ClassifierCNN(ClassifierBase):
         loss = (1 - _w_cos_loss) * std_loss + _w_cos_loss * cos_loss
         return std_loss, std_loss, cos_loss
 
-    def train(self, data):
+    def train(self, data, pos_ratio=1.0):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
         # dataset = self.features_generator.dataset_generate(x_train, y_train)
         dataset = HDF5Dataset(data['train_path'], self.features_generator.transform_sample)
+
+        # --- Few-Shot Experiment Logic ---
+        if pos_ratio < 1.0:
+            # Load all labels to memory to filter indices
+            all_labels = dataset.labels[:]
+            pos_indices = np.where(all_labels == 1)[0]
+            neg_indices = np.where(all_labels == 0)[0]
+
+            # Randomly select a subset of positive samples
+            num_pos_keep = int(len(pos_indices) * pos_ratio)
+            # Ensure at least a few samples if ratio is very small but > 0
+            if num_pos_keep < 10 and len(pos_indices) > 10: num_pos_keep = 10
+
+            np.random.shuffle(pos_indices)
+            keep_pos_indices = pos_indices[:num_pos_keep]
+
+            final_indices = np.concatenate([neg_indices, keep_pos_indices])
+            dataset = Subset(dataset, final_indices)
+            if self.rank == 0:
+                logging.info(f"[Few-Shot] Training with pos_ratio={pos_ratio}. "
+                             f"Pos samples: {len(keep_pos_indices)}/{len(pos_indices)}")
+        # ---------------------------------
 
         is_distributed = isinstance(self.model, DDP)
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None
