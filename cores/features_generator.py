@@ -159,7 +159,7 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
         self.seq_len = int(SAMPLE_RATE / 50)
 
     @staticmethod
-    def transform_sample(x_sample):
+    def transform_sample_v0(x_sample):
         x_tensor = torch.tensor(x_sample, dtype=torch.float32)
         x_signal = x_tensor.clone()
         x_signal = (x_signal - 2048) / 4096
@@ -246,7 +246,7 @@ class FeaturesGeneratorCNN(FeaturesGeneratorXGB):
         return torch.from_numpy(mtf_image).float().squeeze(0).unsqueeze(0)
 
     @staticmethod
-    def transform_sample_v1(x_sample):
+    def transform_sample(x_sample):
         """
         将样本转换为Tensor，进行Min-Max归一化，并进行填充。
         """

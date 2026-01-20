@@ -243,7 +243,7 @@ class DetectorWrapperV3BIN(DetectorWrapperV3NPY):
 
     def __init__(self, addr, dir_save, key_pick=None, dbo_type='DataV0'):
         super().__init__(addr, dir_save, key_pick=key_pick, dbo_type=dbo_type)
-        self.save_as_svm, self.save_as_h5 = False, False
+        self.save_as_svm, self.save_as_h5 = True, False
         self.is_infer = not self.save_as_svm  # must be
 
         if self.save_as_svm and os.path.exists(self.svm_label_file):
