@@ -502,8 +502,8 @@ class ClassifierCNNAE(ClassifierBase):
             ddp (bool): Flag for distributed data parallel.
         """
         super().__init__()
-        self.num_epochs = 1024
-        self.lr = 1e-4
+        self.num_epochs = getattr(args, 'epochs', 64)
+        self.lr = getattr(args, 'lr', 1e-3)
         self.ae_model_type = getattr(args, 'ae_model_type', 'ae')
         self.training_phase = getattr(args, 'training_phase', 1)
         self.hard_example_threshold = getattr(args, 'hard_example_threshold', 0.8)
@@ -596,14 +596,12 @@ class ClassifierCNNAE(ClassifierBase):
                         if not os.path.exists(train_data_path):
                             raise FileNotFoundError(f"Training data for K-Means not found: {train_data_path}")
 
-                        temp_dataset = HDF5SequentialSliceDataset(train_data_path,
-                                                                  self.transform_fn,
-                                                                  seq_len=self.features_generator.seq_len,
-                                                                  step=self.features_generator.seq_len,
-                                                                  only_normal=True)
-                        num_samples = min(20000, len(temp_dataset))
-                        indices = np.random.choice(len(temp_dataset), num_samples, replace=False)
-                        subset = Subset(temp_dataset, indices)
+                        full_dataset = HDF5Dataset(train_data_path, self.transform_fn)
+                        all_labels = full_dataset.labels[:]
+                        normal_indices = np.where(all_labels == 0)[0]
+                        num_samples = min(20000, len(normal_indices))
+                        indices = np.random.choice(normal_indices, num_samples, replace=False)
+                        subset = Subset(full_dataset, indices)
                         temp_loader = DataLoader(dataset=subset, batch_size=2048, shuffle=False)
 
                         self.model.eval()
@@ -708,13 +706,7 @@ class ClassifierCNNAE(ClassifierBase):
             logging.info(f"Starting Phase 2: Hard Example Mining with threshold {self.hard_example_threshold}...")
 
             # Use the full, non-random dataset to calculate errors for all normal samples
-            full_dataset = HDF5SequentialSliceDataset(
-                data['train_path'],
-                self.transform_fn,
-                seq_len=self.features_generator.seq_len,
-                step=self.features_generator.seq_len,  # no overlap
-                only_normal=True
-            )
+            full_dataset = HDF5Dataset(data['train_path'], self.transform_fn)
             full_loader = DataLoader(dataset=full_dataset, batch_size=2048, shuffle=False)
 
             all_normal_inputs, all_recon_errors = [], []
@@ -852,15 +844,11 @@ class ClassifierCNNAE(ClassifierBase):
         identity = torch.eye(cos_sim_matrix.size(0), device=cos_sim_matrix.device)
         return torch.mean((cos_sim_matrix - identity) ** 2)
 
-    def _train_phase1(self, data, loss_ckp=True):
+    def _train_phase1(self, data, loss_ckp=False):
         if self.save_dir is not None and not os.path.exists(self.save_dir) and self.rank == 0:
             os.makedirs(self.save_dir)
 
-        dataset = HDF5PeakAlignedDataset(
-            data['train_path'],
-            self.transform_fn,
-            seq_len=self.features_generator.seq_len,
-            min_delta=MIN_VAL_TH)
+        dataset = HDF5Dataset(data['train_path'], self.transform_fn)
 
         is_distributed = isinstance(self.model, DDP)
         train_sampler = torch.utils.data.distributed.DistributedSampler(dataset) if is_distributed else None
@@ -1024,7 +1012,75 @@ class ClassifierCNNAE(ClassifierBase):
 
         return np.concatenate(all_recon_errors), np.concatenate(all_latents), np.concatenate(all_entropy_scores)
 
-    def evaluate(self, test_path, batch_size=1024, threshold=None, plot_positive_index=None, plot_negative_index=None):
+    def evaluate(self, test_path, batch_size=1024):
+        """
+        New evaluation method using HDF5Dataset and auto-threshold search.
+        Calculates F1, Pos Acc, and Neg Acc.
+        """
+        dataset = HDF5Dataset(test_path, self.transform_fn)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+        if self.training_phase == 2 and hasattr(self, 'memory_head'):
+            self.memory_head.eval()
+
+        model_to_eval = self.model.module if isinstance(self.model, DDP) else self.model
+        model_to_eval.eval()
+
+        all_scores = []
+        all_labels = []
+
+        with torch.no_grad():
+            for inputs, labels in loader:
+                inputs = inputs.to(self.local_rank)
+
+                if self.training_phase == 1:
+                    reconstructions, *_ = model_to_eval(inputs)
+                    # Generic reconstruction error calculation (MSE)
+                    # dims: (batch, channel, length) -> mean over (1, 2)
+                    scores = torch.mean((inputs - reconstructions) ** 2, dim=tuple(range(1, inputs.dim()))).cpu().numpy()
+                else:  # Phase 2
+                    latents = model_to_eval.encode(inputs)
+                    attention_weights = self.memory_head(latents)
+                    epsilon = 1e-12
+                    entropy = -attention_weights * torch.log(attention_weights + epsilon)
+                    scores = torch.sum(entropy, dim=1).cpu().numpy()
+
+                all_scores.extend(scores)
+                all_labels.extend(labels.cpu().numpy().flatten())
+
+        all_scores = np.array(all_scores)
+        all_labels = np.array(all_labels)
+
+        # Auto-search for best threshold using ROC curve (Youden's J statistic)
+        fpr, tpr, thresholds = roc_curve(all_labels, all_scores)
+        j_scores = tpr - fpr
+        best_threshold_idx = np.argmax(j_scores)
+        best_threshold = thresholds[best_threshold_idx]
+
+        # Generate predictions based on best threshold
+        predictions = (all_scores >= best_threshold).astype(int)
+
+        # Calculate metrics
+        f1 = f1_score(all_labels, predictions)
+
+        num_pos = np.sum(all_labels == 1)
+        num_neg = np.sum(all_labels == 0)
+        correct_pos = np.sum((predictions == 1) & (all_labels == 1))
+        correct_neg = np.sum((predictions == 0) & (all_labels == 0))
+
+        acc_pos = correct_pos / num_pos if num_pos > 0 else 0.0
+        acc_neg = correct_neg / num_neg if num_neg > 0 else 0.0
+
+        if self.rank == 0:
+            logging.info(f'[Eval] Neg Acc: {acc_neg:.4f} ({correct_neg}/{num_neg}) | '
+                         f'Pos Acc: {acc_pos:.4f} ({correct_pos}/{num_pos}) | '
+                         f'Th: {best_threshold:.6f} | F1: {f1:.4f}')
+
+        # Revert to train mode
+        model_to_eval.train()
+        return f1
+
+    def evaluate_v0(self, test_path, batch_size=1024, threshold=None, plot_positive_index=None, plot_negative_index=None):
         """
         在测试集上评估自编码器模型，并计算详细的准确率指标。
 
